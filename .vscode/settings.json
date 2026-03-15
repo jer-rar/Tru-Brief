@@ -1,0 +1,45 @@
+{
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
+  "deno.path": "D:/Tru-Developer/Scoop/shims/deno.exe",
+  "java.jdt.ls.java.home": "d:/Tru-Developer/AndroidStudio/jbr",
+  "gradle.java.home": "d:/Tru-Developer/AndroidStudio/jbr",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-21",
+      "path": "d:/Tru-Developer/AndroidStudio/jbr",
+      "default": true
+    }
+  ],
+  "java.home": "d:/Tru-Developer/AndroidStudio/jbr",
+  "deno.lint": true,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "dart.lineLength": 100,
+  "dart.analysisExcludedFolders": [
+    "build",
+    ".dart_tool"
+  ],
+  "deno.unstable": [
+    "bare-node-builtins",
+    "byonm",
+    "sloppy-imports",
+    "unsafe-proto",
+    "webgpu",
+    "broadcast-channel",
+    "worker-options",
+    "cron",
+    "kv",
+    "ffi",
+    "fs",
+    "http",
+    "net"
+  ],
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  }
+}
