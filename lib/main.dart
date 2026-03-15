@@ -1394,15 +1394,10 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
   List<String> _selectedCategories = [];
   List<dynamic> _sources = [];
   List<String> _selectedSources = [];
-  final Set<String> _expandedCategories = {};
-
   String _locationType = 'none'; // 'exact', 'zip', 'none'
   String? _zipCode;
   final TextEditingController _zipController = TextEditingController();
   bool _showLocationEditor = false;
-
-  bool _briefSourcesExpanded = false;
-  bool _addChannelTabsExpanded = false;
 
   @override
   void initState() {
@@ -1729,250 +1724,171 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                             ),
                             const SizedBox(height: 32),
 
-                          // --- TRU BRIEF SOURCES (COLLAPSIBLE) ---
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF6200),
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 50),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () => setState(() => _briefSourcesExpanded = !_briefSourcesExpanded),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Text('Tru Brief', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 8),
-                                Icon(_briefSourcesExpanded ? Icons.expand_less : Icons.expand_more),
-                              ],
-                            ),
-                          ),
-                          
-                          if (_briefSourcesExpanded)
-                            Container(
-                              margin: const EdgeInsets.only(top: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1C1C1E),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: Column(
-                                children: _categories.where((cat) => !_virtualCategories.contains(cat)).map((cat) {
-                                  final shortCat = cat.replaceAll(' Brief', '').replaceAll(' News', '').trim();
-                                  final catSources = _sources.where((s) {
-                                    final sCat = s['category']?.toString() ?? '';
-                                    return sCat == cat || sCat == shortCat || sCat == '$shortCat Brief' || sCat == '$shortCat News';
-                                  }).toList();
-
-                                  final isCatExpanded = _expandedCategories.contains(cat);
-                                  final catSourceIds = catSources.map((s) => s['id'].toString()).toSet();
-                                  final defaultTop3Ids = catSources.where((s) => s['requires_subscription'] != true).take(3).map((s) => s['id'].toString()).toSet();
-                                  final hasCustom = _selectedSources.any((id) => catSourceIds.contains(id) && !defaultTop3Ids.contains(id));
-
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    child: Column(
-                                      children: [
-                                        ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFFFF6200).withValues(alpha: isCatExpanded ? 1.0 : 0.8),
-                                            foregroundColor: Colors.white,
-                                            minimumSize: const Size(double.infinity, 44),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                            elevation: 0,
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              if (isCatExpanded) {
-                                                _expandedCategories.remove(cat);
-                                              } else {
-                                                _expandedCategories.add(cat);
-                                              }
-                                            });
-                                          },
-                                          child: Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Text(cat, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                              Row(
-                                                children: [
-                                                  if (hasCustom)
-                                                    const Padding(
-                                                      padding: EdgeInsets.only(right: 8),
-                                                      child: Text('custom', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.white70)),
-                                                    ),
-                                                  Icon(isCatExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        if (isCatExpanded)
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Builder(builder: (context) {
-                                                  final freeSources = catSources.where((s) => s['requires_subscription'] != true).toList();
-                                                  final subSources = catSources.where((s) => s['requires_subscription'] == true).toList();
-                                                  final connectedSubs = subSources.where((s) => _selectedSources.contains(s['id'].toString())).toList();
-                                                  final unconnectedSubs = subSources.where((s) => !_selectedSources.contains(s['id'].toString())).toList();
-                                                  final topSources = [...freeSources.take(3), ...connectedSubs];
-                                                  final moreFree = freeSources.skip(3).toList();
-                                                  return Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text(
-                                                        connectedSubs.isEmpty ? 'Top 3 News Sources' : 'Your Top Sources',
-                                                        style: const TextStyle(fontSize: 12, color: Color(0xFFFF6200), fontWeight: FontWeight.bold),
-                                                      ),
-                                                      ...topSources.map((src) => _buildSourceTile(src, isSubscription: src['requires_subscription'] == true)),
-                                                      if (moreFree.isNotEmpty) ...[
-                                                        const Divider(color: Colors.white10),
-                                                        const Text('More Sources', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                                                        ...moreFree.map((src) => _buildSourceTile(src)),
-                                                      ],
-                                                      if (unconnectedSubs.isNotEmpty) ...[
-                                                        const Divider(color: Colors.white24),
-                                                        Row(
-                                                          children: const [
-                                                            Icon(Icons.lock_outline, size: 12, color: Colors.orange),
-                                                            SizedBox(width: 4),
-                                                            Text('Sources Require Account', style: TextStyle(fontSize: 12, color: Colors.orange)),
-                                                          ],
-                                                        ),
-                                                        ...unconnectedSubs.map((src) => _buildSourceTile(src, isSubscription: true)),
-                                                      ],
-                                                    ],
-                                                  );
-                                                }),
-                                                const Divider(color: Colors.white10),
-                                                Row(
-                                                  children: [
-                                                    const Icon(Icons.person_outline, size: 12, color: Colors.white38),
-                                                    const SizedBox(width: 4),
-                                                    const Text('Have an account? Tap', style: TextStyle(fontSize: 11, color: Colors.white38)),
-                                                    const SizedBox(width: 4),
-                                                    const Icon(Icons.login, size: 12, color: Colors.white38),
-                                                    const Text(' on any source to sign in', style: TextStyle(fontSize: 11, color: Colors.white38)),
-                                                  ],
-                                                ),
-                                              ],
+                          // --- MY FEED TABS ---
+                          const Text('My Feed Tabs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          const SizedBox(height: 4),
+                          const Text('Drag to reorder • Tap to manage sources', style: TextStyle(fontSize: 12, color: Colors.white38)),
+                          const SizedBox(height: 12),
+                          ReorderableListView(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            buildDefaultDragHandles: false,
+                            onReorder: (oldIndex, newIndex) {
+                              setState(() {
+                                if (newIndex > oldIndex) newIndex -= 1;
+                                if (newIndex == 0) newIndex = 1;
+                                if (oldIndex == 0) return;
+                                final item = _selectedCategories.removeAt(oldIndex);
+                                _selectedCategories.insert(newIndex, item);
+                              });
+                              _savePreferences();
+                            },
+                            children: _selectedCategories.map((cat) {
+                              final bool isTruBrief = cat == 'Tru Brief';
+                              final idx = _selectedCategories.indexOf(cat);
+                              final shortCat = cat.replaceAll(' Brief', '').replaceAll(' News', '').trim();
+                              final catSources = _sources.where((s) {
+                                final sCat = s['category']?.toString() ?? '';
+                                return sCat == cat || sCat == shortCat || sCat == '$shortCat Brief' || sCat == '$shortCat News';
+                              }).toList();
+                              return Container(
+                                key: ValueKey(cat),
+                                margin: const EdgeInsets.only(bottom: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1C1C1E),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.4)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(width: 12),
+                                    if (isTruBrief)
+                                      const Icon(Icons.push_pin, color: Color(0xFFFF6200), size: 18)
+                                    else
+                                      ReorderableDragStartListener(
+                                        index: idx,
+                                        child: const Icon(Icons.drag_handle, color: Colors.white38, size: 22),
+                                      ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: () {
+                                          Navigator.push(context, MaterialPageRoute(
+                                            builder: (_) => CategoryDetailScreen(
+                                              category: cat,
+                                              sources: catSources,
+                                              selectedSources: List<String>.from(_selectedSources),
+                                              isInFeed: true,
+                                              onChanged: (newSources, inFeed) {
+                                                setState(() {
+                                                  _selectedSources = newSources;
+                                                  if (!inFeed) _selectedCategories.remove(cat);
+                                                });
+                                                _savePreferences();
+                                              },
                                             ),
-                                          ),
-                                      ],
+                                          ));
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 14),
+                                          child: Text(cat, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                                        ),
+                                      ),
                                     ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          const SizedBox(height: 32),
-
-                          // --- ADD CHANNEL TABS (COLLAPSIBLE) ---
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF6200),
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 50),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () => setState(() => _addChannelTabsExpanded = !_addChannelTabsExpanded),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Text('Show Channel Tabs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 8),
-                                Icon(_addChannelTabsExpanded ? Icons.expand_less : Icons.expand_more),
-                              ],
-                            ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
                           ),
-
-                          if (_addChannelTabsExpanded)
-                            Container(
-                              margin: const EdgeInsets.only(top: 12),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1C1C1E),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: ReorderableListView(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                buildDefaultDragHandles: false,
-                                onReorder: (oldIndex, newIndex) {
-                                  setState(() {
-                                    if (newIndex > oldIndex) newIndex -= 1;
-                                    if (newIndex == 0) newIndex = 1;
-                                    if (oldIndex == 0) return;
-                                    final String item = _categories.removeAt(oldIndex);
-                                    _categories.insert(newIndex, item);
-                                  });
-                                  _savePreferences();
-                                },
-                                children: _categories.map((cat) {
-                                  final bool isTruBrief = cat == 'Tru Brief';
-                                  final bool isSelected = _selectedCategories.contains(cat);
-
-                                  return Padding(
-                                    key: ValueKey(cat),
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: InkWell(
-                                      onTap: isTruBrief ? null : () {
+                          const SizedBox(height: 32),
+                          // --- ALL CATEGORIES GRID ---
+                          const Text('All Categories', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          const SizedBox(height: 4),
+                          const Text('Tap to manage sources or add to your feed', style: TextStyle(fontSize: 12, color: Colors.white38)),
+                          const SizedBox(height: 12),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 2.4,
+                            ),
+                            itemCount: _categories.where((c) => !_virtualCategories.contains(c)).length,
+                            itemBuilder: (context, index) {
+                              final cat = _categories.where((c) => !_virtualCategories.contains(c)).toList()[index];
+                              final bool isInFeed = _selectedCategories.contains(cat);
+                              final bool isTruBrief = cat == 'Tru Brief';
+                              final shortCat = cat.replaceAll(' Brief', '').replaceAll(' News', '').trim();
+                              final catSources = _sources.where((s) {
+                                final sCat = s['category']?.toString() ?? '';
+                                return sCat == cat || sCat == shortCat || sCat == '$shortCat Brief' || sCat == '$shortCat News';
+                              }).toList();
+                              final activeCount = catSources.where((s) => _selectedSources.contains(s['id'].toString())).length;
+                              return GestureDetector(
+                                onTap: () {
+                                  Navigator.push(context, MaterialPageRoute(
+                                    builder: (_) => CategoryDetailScreen(
+                                      category: cat,
+                                      sources: catSources,
+                                      selectedSources: List<String>.from(_selectedSources),
+                                      isInFeed: isInFeed,
+                                      onChanged: (newSources, inFeed) {
                                         setState(() {
-                                          if (isSelected) {
-                                            _selectedCategories.remove(cat);
-                                          } else {
+                                          _selectedSources = newSources;
+                                          if (inFeed && !_selectedCategories.contains(cat)) {
                                             _selectedCategories.add(cat);
+                                          } else if (!inFeed) {
+                                            _selectedCategories.remove(cat);
                                           }
                                         });
                                         _savePreferences();
                                       },
-                                      child: Container(
-                                        height: 44,
-                                        decoration: BoxDecoration(
-                                          color: isSelected ? const Color(0xFF2C1C16) : const Color(0xFF000000),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(
-                                            color: isSelected ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10,
-                                          ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            const SizedBox(width: 12),
-                                            if (isTruBrief)
-                                              const Icon(Icons.push_pin, color: Color(0xFFFF6200), size: 18)
-                                            else
-                                              ReorderableDragStartListener(
-                                                index: _categories.indexOf(cat),
-                                                child: const Icon(Icons.drag_handle, color: Colors.white24, size: 20),
-                                              ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Text(
-                                                cat,
-                                                style: TextStyle(
-                                                  color: isSelected ? Colors.white : Colors.white54,
-                                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                                ),
-                                              ),
-                                            ),
-                                            if (isSelected)
-                                              const Padding(
-                                                padding: EdgeInsets.only(right: 12),
-                                                child: Icon(Icons.check, color: Color(0xFFFF6200), size: 18),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
                                     ),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                            
+                                  ));
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: isInFeed ? const Color(0xFF2C1C16) : const Color(0xFF1C1C1E),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: isInFeed ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              cat,
+                                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: isInFeed ? Colors.white : Colors.white70),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (isTruBrief)
+                                            const Icon(Icons.push_pin, size: 12, color: Color(0xFFFF6200))
+                                          else if (isInFeed)
+                                            const Icon(Icons.check_circle, size: 14, color: Color(0xFFFF6200))
+                                          else
+                                            const Icon(Icons.add_circle_outline, size: 14, color: Colors.white24),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$activeCount source${activeCount == 1 ? '' : 's'} active',
+                                        style: TextStyle(fontSize: 11, color: isInFeed ? Colors.white54 : Colors.white24),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                           const SizedBox(height: 32),
                           const Divider(color: Colors.white10, height: 40),
                           Center(
@@ -2215,6 +2131,184 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
           onPressed: () => _openSourceLogin(src),
         ),
       ],
+    );
+  }
+}
+
+class CategoryDetailScreen extends StatefulWidget {
+  final String category;
+  final List<dynamic> sources;
+  final List<String> selectedSources;
+  final bool isInFeed;
+  final void Function(List<String> newSources, bool inFeed) onChanged;
+
+  const CategoryDetailScreen({
+    super.key,
+    required this.category,
+    required this.sources,
+    required this.selectedSources,
+    required this.isInFeed,
+    required this.onChanged,
+  });
+
+  @override
+  State<CategoryDetailScreen> createState() => _CategoryDetailScreenState();
+}
+
+class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
+  late List<String> _selectedSources;
+  late bool _isInFeed;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSources = List<String>.from(widget.selectedSources);
+    _isInFeed = widget.isInFeed;
+    if (_isInFeed) {
+      final freeSources = widget.sources.where((s) => s['requires_subscription'] != true).toList();
+      final top3 = freeSources.take(3).map((s) => s['id'].toString()).toList();
+      for (final id in top3) {
+        if (!_selectedSources.contains(id)) _selectedSources.add(id);
+      }
+    }
+  }
+
+  void _toggle(String id, bool val, {bool isSubscription = false}) {
+    setState(() {
+      if (val) {
+        _selectedSources.add(id);
+      } else {
+        _selectedSources.remove(id);
+      }
+    });
+    widget.onChanged(_selectedSources, _isInFeed);
+  }
+
+  void _openLogin(dynamic src) {
+    final url = src['url']?.toString() ?? '';
+    if (url.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ArticleReaderScreen(url: url, sourceName: src['name']?.toString() ?? ''),
+      ),
+    );
+  }
+
+  Widget _sourceTile(dynamic src) {
+    final id = src['id'].toString();
+    final isSelected = _selectedSources.contains(id);
+    final isSub = src['requires_subscription'] == true;
+    return Row(
+      children: [
+        Expanded(
+          child: CheckboxListTile(
+            title: Text(src['name'] ?? '', style: const TextStyle(fontSize: 14)),
+            subtitle: Text(src['url'] ?? '', style: const TextStyle(fontSize: 11, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+            value: isSelected,
+            activeColor: const Color(0xFFFF6200),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            onChanged: (val) => _toggle(id, val == true, isSubscription: isSub),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.login, size: 16, color: Colors.white38),
+          tooltip: 'Sign in to ${src['name']}',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          onPressed: () => _openLogin(src),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final freeSources = widget.sources.where((s) => s['requires_subscription'] != true).toList();
+    final subSources = widget.sources.where((s) => s['requires_subscription'] == true).toList();
+    final top3 = freeSources.take(3).toList();
+    final moreFree = freeSources.skip(3).toList();
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Text(widget.category),
+        backgroundColor: Colors.black,
+        elevation: 0,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1C1C1E),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _isInFeed ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Show in feed', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                      Text('Adds ${widget.category} tab to your home feed', style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _isInFeed,
+                  activeColor: const Color(0xFFFF6200),
+                  onChanged: (val) {
+                    setState(() => _isInFeed = val);
+                    widget.onChanged(_selectedSources, val);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (top3.isNotEmpty) ...[
+            const Text('Top 3 News Sources', style: TextStyle(fontSize: 13, color: Color(0xFFFF6200), fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            ...top3.map(_sourceTile),
+          ],
+          if (moreFree.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(color: Colors.white10),
+            const Text('More Sources', style: TextStyle(fontSize: 13, color: Colors.grey)),
+            const SizedBox(height: 4),
+            ...moreFree.map(_sourceTile),
+          ],
+          if (subSources.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Divider(color: Colors.white24),
+            Row(
+              children: const [
+                Icon(Icons.lock_outline, size: 13, color: Colors.orange),
+                SizedBox(width: 6),
+                Text('Sources Require Account', style: TextStyle(fontSize: 13, color: Colors.orange)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            ...subSources.map(_sourceTile),
+          ],
+          const SizedBox(height: 12),
+          const Divider(color: Colors.white10),
+          Row(
+            children: const [
+              Icon(Icons.person_outline, size: 12, color: Colors.white38),
+              SizedBox(width: 4),
+              Text('Have an account? Tap ', style: TextStyle(fontSize: 11, color: Colors.white38)),
+              Icon(Icons.login, size: 12, color: Colors.white38),
+              Text(' on any source to sign in', style: TextStyle(fontSize: 11, color: Colors.white38)),
+            ],
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 }
