@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'package:html_character_entities/html_character_entities.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1398,6 +1399,8 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
   String? _zipCode;
   final TextEditingController _zipController = TextEditingController();
   bool _showLocationEditor = false;
+  bool _myFeedExpanded = false;
+  bool _availableFeedsExpanded = false;
 
   @override
   void initState() {
@@ -1610,45 +1613,86 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             // --- LOCATION SETTINGS ---
-                            const Text('Location Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1C1C1E),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: Column(
-                                children: [
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.gps_fixed, color: Color(0xFFFF6200), size: 20),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Text(
-                                          _locationType == 'exact' ? 'Using exact location' : (_locationType == 'zip' ? 'Zip: $_zipCode' : 'Not set'),
-                                          style: const TextStyle(fontSize: 16),
-                                        ),
-                                      ),
-                                      TextButton(
-                                        onPressed: () => setState(() => _showLocationEditor = !_showLocationEditor),
-                                        child: Text(_showLocationEditor ? 'Cancel' : 'Change', style: const TextStyle(color: Color(0xFFFF6200))),
-                                      ),
-                                    ],
+                            Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(14),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () => setState(() => _showLocationEditor = !_showLocationEditor),
+                                child: Ink(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [const Color(0xFF1A1A1A), const Color(0xFF001A10)],
+                                      begin: Alignment.centerLeft,
+                                      end: Alignment.centerRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: _locationType != 'none' ? 0.5 : 0.2), width: 1.2),
                                   ),
-                                  if (_showLocationEditor) ...[
-                                    const Divider(color: Colors.white10, height: 24),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 32, height: 32,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFF6200).withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Icon(
+                                            _locationType == 'exact' ? Icons.gps_fixed : (_locationType == 'zip' ? Icons.location_on : Icons.location_off),
+                                            color: const Color(0xFFFF6200), size: 18,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text('Location Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
+                                            Text(
+                                              _locationType == 'exact' ? 'Using exact GPS location' : (_locationType == 'zip' ? 'Using zip code: $_zipCode' : 'Location not set'),
+                                              style: TextStyle(fontSize: 11, color: _locationType != 'none' ? const Color(0xFFFF6200).withValues(alpha: 0.7) : Colors.white38),
+                                            ),
+                                          ],
+                                        ),
+                                        const Spacer(),
+                                        AnimatedRotation(
+                                          turns: _showLocationEditor ? 0.5 : 0.0,
+                                          duration: const Duration(milliseconds: 250),
+                                          child: Container(
+                                            width: 28, height: 28,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFFF6200).withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(7),
+                                            ),
+                                            child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 20),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (_showLocationEditor) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1C1C1E),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.white10),
+                                ),
+                                child: Column(
+                                  children: [
                                     ListTile(
-                                      leading: const Icon(Icons.my_location, color: Colors.white70),
-                                      title: const Text('Use GPS Location'),
-                                      subtitle: const Text('Most accurate for local news'),
+                                      leading: const Icon(Icons.my_location, color: Color(0xFFFF6200)),
+                                      title: const Text('Use GPS Location', style: TextStyle(color: Colors.white)),
+                                      subtitle: const Text('Most accurate for local news', style: TextStyle(color: Colors.white38)),
                                       onTap: () async {
                                         setState(() => _loading = true);
                                         try {
                                           LocationPermission permission = await Geolocator.checkPermission();
                                           if (permission == LocationPermission.denied) permission = await Geolocator.requestPermission();
-                                          
                                           if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
                                             Position position = await Geolocator.getCurrentPosition();
                                             List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
@@ -1659,10 +1703,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                                 _zipCode = place.postalCode;
                                                 _showLocationEditor = false;
                                               });
-                                              _savePreferences(
-                                                city: place.locality,
-                                                state: place.administrativeArea,
-                                              );
+                                              _savePreferences(city: place.locality, state: place.administrativeArea);
                                             }
                                           }
                                         } catch (e) {
@@ -1712,22 +1753,78 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                                 _savePreferences();
                                               }
                                             },
-                                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF6200)),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFFFF6200),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                                            ),
                                             child: const Text('Save'),
                                           ),
                                         ],
                                       ),
                                     ),
                                   ],
-                                ],
+                                ),
                               ),
-                            ),
+                            ],
                             const SizedBox(height: 32),
 
                           // --- MY FEED TABS ---
-                          const Text('My Feed Tabs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                          const SizedBox(height: 4),
-                          const Text('Drag to reorder • Tap to manage sources', style: TextStyle(fontSize: 12, color: Colors.white38)),
+                          Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => setState(() => _myFeedExpanded = !_myFeedExpanded),
+                              child: Ink(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [const Color(0xFF1A1A1A), const Color(0xFF2A1800)],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.2),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 32, height: 32,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFF6200).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.rss_feed, color: Color(0xFFFF6200), size: 18),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('My Feed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
+                                          Text(_myFeedExpanded ? 'Drag to reorder • Tap to manage' : 'Manage your active feed tabs', style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                                        ],
+                                      ),
+                                      const Spacer(),
+                                      AnimatedRotation(
+                                        turns: _myFeedExpanded ? 0.5 : 0.0,
+                                        duration: const Duration(milliseconds: 250),
+                                        child: Container(
+                                          width: 28, height: 28,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFF6200).withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(7),
+                                          ),
+                                          child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 20),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_myFeedExpanded) ...[
                           const SizedBox(height: 12),
                           ReorderableListView(
                             shrinkWrap: true,
@@ -1801,11 +1898,65 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                               );
                             }).toList(),
                           ),
+                          ], // end _myFeedExpanded
                           const SizedBox(height: 32),
                           // --- ALL CATEGORIES GRID ---
-                          const Text('All Categories', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                          const SizedBox(height: 4),
-                          const Text('Tap to manage sources or add to your feed', style: TextStyle(fontSize: 12, color: Colors.white38)),
+                          Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => setState(() => _availableFeedsExpanded = !_availableFeedsExpanded),
+                              child: Ink(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [const Color(0xFF1A1A1A), const Color(0xFF001A2A)],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1.2),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 32, height: 32,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.07),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.grid_view_rounded, color: Colors.white54, size: 18),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Available Feeds', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
+                                          Text(_availableFeedsExpanded ? 'Tap to manage sources or add to feed' : 'Browse & add more categories', style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                                        ],
+                                      ),
+                                      const Spacer(),
+                                      AnimatedRotation(
+                                        turns: _availableFeedsExpanded ? 0.5 : 0.0,
+                                        duration: const Duration(milliseconds: 250),
+                                        child: Container(
+                                          width: 28, height: 28,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.07),
+                                            borderRadius: BorderRadius.circular(7),
+                                          ),
+                                          child: const Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 20),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_availableFeedsExpanded) ...[
                           const SizedBox(height: 12),
                           GridView.builder(
                             shrinkWrap: true,
@@ -1888,6 +2039,53 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                 ),
                               );
                             },
+                          ),
+                          ], // end _availableFeedsExpanded
+                          const SizedBox(height: 16),
+                          // --- NEWSLETTERS ---
+                          Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NewslettersScreen())),
+                              child: Ink(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [const Color(0xFF1A1A1A), const Color(0xFF1A001A)],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.35), width: 1.2),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 32, height: 32,
+                                        decoration: BoxDecoration(
+                                          color: Colors.purpleAccent.withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.mark_email_read_outlined, color: Colors.purpleAccent, size: 18),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Newsletters', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
+                                          Text('Add email newsletters to your feed', style: TextStyle(fontSize: 11, color: Colors.white38)),
+                                        ],
+                                      ),
+                                      const Spacer(),
+                                      const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                           const SizedBox(height: 32),
                           const Divider(color: Colors.white10, height: 40),
@@ -2131,6 +2329,416 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
           onPressed: () => _openSourceLogin(src),
         ),
       ],
+    );
+  }
+}
+
+class NewslettersScreen extends StatefulWidget {
+  const NewslettersScreen({super.key});
+  @override
+  State<NewslettersScreen> createState() => _NewslettersScreenState();
+}
+
+class _NewslettersScreenState extends State<NewslettersScreen> {
+  final List<Map<String, String>> _curated = [
+    {'name': 'Morning Brew', 'desc': 'Business news in a witty, quick read', 'url': 'https://www.morningbrew.com/daily', 'icon': '☕'},
+    {'name': 'TLDR', 'desc': 'Tech, science & coding headlines daily', 'url': 'https://tldr.tech', 'icon': '⚡'},
+    {'name': 'The Hustle', 'desc': 'Business & tech stories that matter', 'url': 'https://thehustle.co', 'icon': '💼'},
+    {'name': '1440 Daily Digest', 'desc': 'News without bias, 1440 minutes of day', 'url': 'https://join1440.com', 'icon': '📰'},
+    {'name': 'Axios AM', 'desc': 'Smart brevity on top stories each morning', 'url': 'https://www.axios.com/newsletters/axios-am', 'icon': '🌅'},
+    {'name': 'The Pour Over', 'desc': 'Christian perspective on world news', 'url': 'https://thepourover.org', 'icon': '✝️'},
+    {'name': 'NextDraft', 'desc': "Dave Pell's daily take on the internet's best", 'url': 'https://nextdraft.com', 'icon': '🗞️'},
+    {'name': 'Milk Road', 'desc': 'Crypto news made simple', 'url': 'https://www.milkroad.com', 'icon': '🥛'},
+    {'name': 'Dense Discovery', 'desc': 'Design, tech & culture weekly', 'url': 'https://www.densediscovery.com', 'icon': '🎨'},
+    {'name': 'Politico Playbook', 'desc': 'Inside Washington politics every morning', 'url': 'https://www.politico.com/playbook', 'icon': '🏛️'},
+    {'name': 'The Rundown AI', 'desc': 'Daily AI news and tools digest', 'url': 'https://www.therundown.ai', 'icon': '🤖'},
+    {'name': 'Finimize', 'desc': 'Finance news explained in plain English', 'url': 'https://www.finimize.com', 'icon': '📈'},
+  ];
+
+  List<Map<String, dynamic>> _myNewsletters = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyNewsletters();
+  }
+
+  Future<void> _loadMyNewsletters() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('trl_sources')
+          .select()
+          .eq('is_custom', true);
+      if (mounted) setState(() { _myNewsletters = List<Map<String, dynamic>>.from(data); _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _deleteNewsletter(String id) async {
+    try {
+      await Supabase.instance.client.from('trl_articles').delete().eq('source_id', id);
+      await Supabase.instance.client.from('trl_sources').delete().eq('id', id);
+      _loadMyNewsletters();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  void _showAddSheet({String? prefillName, String? prefillUrl}) {
+    final nameCtrl = TextEditingController(text: prefillName ?? '');
+    final rssCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(left: 20, right: 20, top: 24, bottom: MediaQuery.of(ctx).viewInsets.bottom + 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: Container(width: 36, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+            const SizedBox(height: 20),
+            const Text('Add Newsletter', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 6),
+            if (prefillUrl != null) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.3))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('One-time setup — follow these steps:', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 10),
+                    _step('1', 'Tap "Step 1 — Open Kill the Newsletter" below. It will open in your browser — keep that tab open, you\'ll need to return to it in Step 3.\n\nOn the Kill the Newsletter page, enter "${prefillName ?? 'Newsletter'}" as the name and tap Create.'),
+                    const SizedBox(height: 4),
+                    Container(
+                      margin: const EdgeInsets.only(left: 28, bottom: 10),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white10)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('You\'ll receive 2 addresses:', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          const Text('📧  EMAIL ADDRESS (1st) — used to subscribe to the newsletter', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                          const Text('📡  ATOM FEED URL (2nd) — used to connect it to TruBrief', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                    _step('2', 'Copy the EMAIL ADDRESS (1st field) and come back to TruBrief.'),
+                    const SizedBox(height: 4),
+                    _step('3', 'Tap "Step 2 — Go to ${prefillName ?? 'Newsletter'}" below and subscribe using that EMAIL ADDRESS on their signup page.'),
+                    const SizedBox(height: 4),
+                    _step('4', 'Come back to this screen.\nCopy the ATOM FEED URL (2nd field on Kill the Newsletter) and paste it into the field below.'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () async {
+                  await launchUrl(Uri.parse('https://kill-the-newsletter.com'), mode: LaunchMode.externalApplication);
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.5))),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.open_in_new, color: Colors.purpleAccent, size: 16),
+                      SizedBox(width: 8),
+                      Text('Step 1 — Open Kill the Newsletter', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.w700, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () async {
+                  await launchUrl(Uri.parse(prefillUrl!), mode: LaunchMode.externalApplication);
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white24)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.open_in_new, color: Colors.white54, size: 16),
+                      const SizedBox(width: 8),
+                      Text('Step 2 — Go to ${prefillName ?? 'Newsletter'} to Subscribe', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white10)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _step('1', 'Go to kill-the-newsletter.com → type a name → tap Create'),
+                    _step('2', 'Copy the EMAIL ADDRESS (first field) and subscribe to your newsletter using it'),
+                    _step('3', 'Copy the ATOM FEED URL (second field) and paste it below'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            TextField(
+              controller: nameCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Newsletter Name',
+                labelStyle: const TextStyle(color: Colors.white38),
+                filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: rssCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'RSS Feed URL (from Kill the Newsletter)',
+                labelStyle: const TextStyle(color: Colors.white38),
+                filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  final name = nameCtrl.text.trim();
+                  final rss = rssCtrl.text.trim();
+                  if (name.isEmpty || rss.isEmpty) return;
+                  Navigator.pop(ctx);
+                  try {
+                    await Supabase.instance.client.from('trl_sources').insert({
+                      'name': name,
+                      'url': rss,
+                      'type': 'rss',
+                      'category': 'Tru Brief',
+                      'requires_subscription': false,
+                      'is_preset': false,
+                      'is_custom': true,
+                    });
+                    _loadMyNewsletters();
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Newsletter added to Tru Brief!')));
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purpleAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Add to Tru Brief', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _step(String num, String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 20, height: 20,
+          decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.2), shape: BoxShape.circle),
+          child: Center(child: Text(num, style: const TextStyle(color: Colors.purpleAccent, fontSize: 11, fontWeight: FontWeight.bold))),
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+        title: const Text('Newsletters', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6200)))
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // --- EXPLAINER ---
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [const Color(0xFF1A001A), const Color(0xFF0D0D1A)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Icon(Icons.mark_email_read_outlined, color: Colors.purpleAccent, size: 20),
+                        const SizedBox(width: 8),
+                        const Text('How it works', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.bold, fontSize: 14)),
+                      ]),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'TruBrief uses a free service called Kill the Newsletter to convert email newsletters into feed articles. You\'ll be redirected there once per newsletter to complete setup — after that, everything arrives automatically in your Tru Brief tab.',
+                        style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                      ),
+                      const SizedBox(height: 12),
+                      _step('1', 'Tap a newsletter below — you\'ll be sent to Kill the Newsletter'),
+                      _step('2', 'Type the newsletter name and tap Create'),
+                      _step('3', 'It will give you two addresses needed for setup:\n📧 EMAIL ADDRESS — the address you\'ll register with the newsletter\n📡 ATOM FEED URL — the address you\'ll paste into TruBrief'),
+                      _step('4', 'Go to the newsletter\'s website and subscribe using the EMAIL ADDRESS'),
+                      _step('5', 'Come back here, paste the ATOM FEED URL, and tap Add'),
+                      _step('6', 'Step-by-step instructions are provided for each newsletter listed below. Any newsletter not listed will follow this same process.'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // --- MY NEWSLETTERS ---
+                if (_myNewsletters.isNotEmpty) ...[
+                  const Text('My Newsletters', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 10),
+                  ..._myNewsletters.map((nl) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle, color: Colors.purpleAccent, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(nl['name']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.white24, size: 20),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                backgroundColor: const Color(0xFF1C1C1E),
+                                title: const Text('Remove Newsletter', style: TextStyle(color: Colors.white)),
+                                content: Text('Remove ${nl['name']} from your feed?', style: const TextStyle(color: Colors.white70)),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove', style: TextStyle(color: Colors.redAccent))),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) _deleteNewsletter(nl['id'].toString());
+                          },
+                        ),
+                      ],
+                    ),
+                  )),
+                  const SizedBox(height: 24),
+                ],
+
+                // --- POPULAR NEWSLETTERS ---
+                const Text('Popular Newsletters', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                const SizedBox(height: 4),
+                const Text('Tap anywhere on a newsletter to set it up', style: TextStyle(fontSize: 12, color: Colors.white38)),
+                const SizedBox(height: 12),
+                ..._curated.map((nl) {
+                  final alreadyAdded = _myNewsletters.any((m) => m['name'] == nl['name']);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Material(
+                        color: alreadyAdded ? const Color(0xFF1A0D1A) : const Color(0xFF1C1C1E),
+                        child: InkWell(
+                          onTap: alreadyAdded ? null : () => _showAddSheet(prefillName: nl['name'], prefillUrl: nl['url']),
+                          splashColor: Colors.purpleAccent.withValues(alpha: 0.15),
+                          highlightColor: Colors.purpleAccent.withValues(alpha: 0.08),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: alreadyAdded ? Colors.purpleAccent.withValues(alpha: 0.4) : Colors.white10),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                            child: Row(
+                              children: [
+                                Text(nl['icon']!, style: const TextStyle(fontSize: 26)),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(nl['name']!, style: TextStyle(color: alreadyAdded ? Colors.purpleAccent : Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+                                      const SizedBox(height: 3),
+                                      Text(nl['desc']!, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                alreadyAdded
+                                    ? const Icon(Icons.check_circle, color: Colors.purpleAccent, size: 20)
+                                    : const Icon(Icons.chevron_right, color: Colors.white24, size: 22),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 24),
+
+                // --- ADD CUSTOM ---
+                Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => _showAddSheet(),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white24, width: 1),
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add, color: Colors.white54, size: 18),
+                            SizedBox(width: 8),
+                            Text('Add Custom Newsletter', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
     );
   }
 }
