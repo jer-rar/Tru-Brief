@@ -105,25 +105,28 @@
 - Ad blocking via content blockers
 - "Subscribe for AI Summary" banner at top (for non-premium users)
 
-### Settings Screen (MAJOR REFACTOR - this session)
-- **Location Settings** section (GPS or zip code)
-- **My Feed Tabs** section:
-  - ReorderableListView of active categories
-  - Drag handles to reorder
-  - Tru Brief pinned at top (push_pin icon)
-  - Tap any row -> opens CategoryDetailScreen
-  - No X remove button (removed to prevent accidents)
-- **All Categories Grid** section:
-  - 2-column grid cards
-  - Shows category name + active source count
-  - Orange = in feed; dark = not in feed
-  - Tap -> opens CategoryDetailScreen
-- **CategoryDetailScreen** (new dedicated screen per category):
-  - "Show in feed" toggle at top (only way to add/remove from feed)
-  - Top 3 News Sources (free, auto-selected)
-  - More Sources (remaining free)
-  - Sources Require Account (subscription, lock icon)
-  - Login button per source (opens in-app browser)
+### Settings Screen
+- All three sections are **polished collapsible buttons** (collapsed by default, animated chevron):
+  - **Location Settings** — green-tinted, shows current location status in subtitle, GPS/zip editor expands below
+  - **My Feed** — orange-tinted gradient, ReorderableListView of active categories
+  - **Available Feeds** — blue-tinted, 2-column grid of all categories
+- **Newsletters** button (purple) navigates to NewslettersScreen
+- **CategoryDetailScreen** (per category): "Show in feed" toggle, Top 3 / More / Subscription sources
+
+### Newsletters Screen (NEW)
+- Accessible from Settings via purple "Newsletters" button
+- **How it works** explainer card with 6-step overview
+- **My Newsletters** section — shows added newsletters with delete
+- **Popular Newsletters** list (12 curated: Morning Brew, TLDR, The Hustle, 1440, Axios AM, The Pour Over, NextDraft, Milk Road, Dense Discovery, Politico Playbook, The Rundown AI, Finimize)
+- Tapping a curated newsletter opens bottom sheet with:
+  - 4-step guided instructions (Kill the Newsletter flow)
+  - "Step 1 — Open Kill the Newsletter" button (purple, opens browser)
+  - "Step 2 — Go to [Newsletter] to Subscribe" button (opens newsletter signup)
+  - Clearly labels EMAIL ADDRESS (1st field) vs ATOM FEED URL (2nd field)
+  - RSS URL input + "Add to Tru Brief" button
+- **Add Custom Newsletter** button at bottom for unlisted newsletters
+- Saved to `trl_sources` with `category = 'Tru Brief'` and `is_custom = true`
+- Requires `is_custom BOOLEAN DEFAULT false` column on `trl_sources` (already added)
 
 ---
 
@@ -141,6 +144,8 @@
 - [ ] No push notifications yet
 - [ ] iOS not tested
 - [ ] AI summary feature not built yet — OpenAI or similar, paid users only
+- [ ] Gizmodo still in Tech Brief — consider replacing with The Register or ExtremeTech
+- [ ] The Next Web still in Tech Brief — occasionally runs off-topic content
 
 
 ---
@@ -148,10 +153,10 @@
 ## IMPORTANT CODE LOCATIONS (lib/main.dart)
 - `_deduplicateByTopic()` — Jaccard dedup/grouping (~line 440)
 - `_showSourcesBottomSheet()` — multi-source modal with AI upsell (~line 748)
-- `SettingsScreen` class — full settings UI
-- `CategoryDetailScreen` class — per-category source management (~line 2152)
-- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 2330)
-- `_buildSourceTile()` — source checkbox row (~line 2113)
+- `SourceSettingsScreen` class — full settings UI (~line 1381)
+- `NewslettersScreen` class — newsletters feature (~line 2335)
+- `CategoryDetailScreen` class — per-category source management (~line 2709)
+- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 2870)
 - Local Brief fetch uses `_userCity`, `_userState` to build Google News RSS URL
 
 ---
@@ -161,6 +166,7 @@
 |---|---|
 | initial | First commit, 145 files |
 | 87abdf3 | Settings UI refactor: My Feed Tabs + Grid + CategoryDetailScreen |
+| 5fb9509 | Newsletters screen, collapsible settings sections, Tech Brief source cleanup, UI polish |
 
 ---
 

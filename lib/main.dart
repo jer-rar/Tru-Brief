@@ -69,6 +69,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
   String? _locationType; // 'exact', 'zip', 'none'
   String? _city;
   String? _state;
+  String? _county;
 
   @override
   void initState() {
@@ -241,6 +242,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
           _zipCode = prefs['zip_code'];
           _city = prefs['city'];
           _state = prefs['state'];
+          _county = prefs['county'];
           _selectedSources = List<String>.from(prefs['selected_sources'] ?? []);
           
           final List<String> savedOrder = List<String>.from(prefs['selected_categories'] ?? []);
@@ -302,16 +304,59 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
   }
 
   Future<List<dynamic>> _fetchGoogleNewsLocal() async {
-    String locationQuery;
+    final List<Future<List<dynamic>>> fetches = [];
+
     if (_city != null && _city!.isNotEmpty && _state != null && _state!.isNotEmpty) {
-      locationQuery = Uri.encodeComponent('"$_city" "$_state"');
+      // Query 1: Exact city
+      fetches.add(_fetchGoogleNewsQuery(
+        Uri.encodeComponent('"$_city" "$_state" local news'),
+      ));
+
+      // Query 2: County-level — covers nearby cities naturally
+      if (_county != null && _county!.isNotEmpty) {
+        final countyName = _county!.replaceAll(RegExp(r'\s*[Cc]ounty$'), '').trim();
+        fetches.add(_fetchGoogleNewsQuery(
+          Uri.encodeComponent('"$countyName County" "$_state" local news'),
+        ));
+        // Query 3: County name without "County" — surfaces major city (e.g. Tampa for Hillsborough)
+        fetches.add(_fetchGoogleNewsQuery(
+          Uri.encodeComponent('"$countyName" "$_state" news'),
+        ));
+      }
     } else if (_zipCode != null && _zipCode!.isNotEmpty) {
-      locationQuery = Uri.encodeComponent('"$_zipCode"');
-    } else {
-      return [];
+      fetches.add(_fetchGoogleNewsQuery(
+        Uri.encodeComponent('"$_zipCode" local news'),
+      ));
     }
 
-    final url = 'https://news.google.com/rss/search?q=when:48h+$locationQuery+local+news&hl=en-US&gl=US&ceid=US:en';
+    if (fetches.isEmpty) return [];
+
+    final results = await Future.wait(fetches);
+
+    // Merge and deduplicate by URL, preserving order (city-specific first)
+    final seen = <String>{};
+    final merged = <dynamic>[];
+    for (final articles in results) {
+      for (final article in articles) {
+        final url = article['original_url'] as String;
+        if (seen.add(url)) {
+          merged.add(article);
+        }
+      }
+    }
+
+    // Sort by date descending
+    merged.sort((a, b) {
+      final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+      final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+      return db.compareTo(da);
+    });
+
+    return merged;
+  }
+
+  Future<List<dynamic>> _fetchGoogleNewsQuery(String encodedQuery) async {
+    final url = 'https://news.google.com/rss/search?q=when:72h+$encodedQuery&hl=en-US&gl=US&ceid=US:en';
     try {
       final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
       final xml = res.body;
@@ -1556,7 +1601,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _savePreferences({String? city, String? state}) async {
+  Future<void> _savePreferences({String? city, String? state, String? county}) async {
     final userId = _effectiveUserId;
     if (userId == null) return;
 
@@ -1576,6 +1621,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
       };
       if (city != null) data['city'] = city;
       if (state != null) data['state'] = state;
+      if (county != null) data['county'] = county;
 
       await Supabase.instance.client.from('trl_user_preferences').upsert(
         data,
@@ -1703,7 +1749,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                                 _zipCode = place.postalCode;
                                                 _showLocationEditor = false;
                                               });
-                                              _savePreferences(city: place.locality, state: place.administrativeArea);
+                                              _savePreferences(city: place.locality, state: place.administrativeArea, county: place.subAdministrativeArea);
                                             }
                                           }
                                         } catch (e) {
