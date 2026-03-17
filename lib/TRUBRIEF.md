@@ -7,11 +7,12 @@
 - **App name:** TruBrief
 - **Company:** Tru-Resolve LLC
 - **Project path:** `D:\Tru-Developer\trubrief_app`
-- **Main file:** `lib/main.dart` (single-file Flutter app, ~3400 lines)
+- **Main file:** `lib/main.dart` (single-file Flutter app, ~3650 lines)
 - **Backend:** Supabase (PostgreSQL)
 - **Platform:** Android (primary), iOS planned
 - **Git repo:** `D:\Tru-Developer\trubrief_app\.git`
-- **Backup method:** `git add -A && git commit -m "checkpoint"` — tell user commit hash to revert
+- **GitHub remote:** `https://github.com/jer-rar/Tru-Brief.git` (private)
+- **Backup method:** `git add -A && git commit -m "checkpoint" && git push origin main`
 
 ---
 
@@ -20,7 +21,8 @@
 - Supabase (auth, DB, preferences)
 - `flutter_inappwebview` v6.1.5 (in-app browser)
 - `geolocator` + `geocoding` (GPS location for Local Brief)
-- RSS feeds via Supabase edge functions or direct fetch
+- `url_launcher` (open external URLs, update download links)
+- RSS feeds fetched directly via `http` package
 
 ---
 
@@ -29,12 +31,14 @@
 - **`trl_sources`** — columns: `id`, `name`, `category`, `url`, `type` (='rss'), `requires_subscription`, `is_preset`, `is_custom`, `created_at`, `city`, `state`
 - **`trl_user_preferences`** — stores per-user settings (selected categories, sources, location, hidden tabs)
 - **`trl_articles`** — cached articles, has `source_id` FK -> `trl_sources.id`
+- **`trl_app_version`** — OTA update control (see Alpha Distribution section)
 
 ### Key DB notes
 - `trl_sources.type` is NOT NULL — always include `'rss'` when inserting
-- `trl_sources.url` has a unique constraint
+- `trl_sources.url` has a unique constraint — use `ON CONFLICT (url) DO NOTHING`
+- `trl_sources` does NOT have `is_active` or `is_featured` columns — use `is_preset` instead
 - Foreign key `trl_articles_source_id_fkey` prevents deleting sources that have articles
-- Location fields on `trl_user_preferences`: `city`, `state`, `county` (NOT `zip_code` — use city/state/county)
+- Location fields on `trl_user_preferences`: `city`, `state`, `county` (NOT `zip_code`)
 - `hidden_tabs TEXT[] DEFAULT '{}'` — categories whose tab chips are hidden from main tab bar
 
 ### SQL migrations run so far
@@ -44,11 +48,54 @@ ALTER TABLE trl_user_preferences ADD COLUMN IF NOT EXISTS county TEXT;
 
 -- Hidden tabs feature
 ALTER TABLE trl_user_preferences ADD COLUMN IF NOT EXISTS hidden_tabs TEXT[] DEFAULT '{}';
+
+-- OTA update table
+CREATE TABLE trl_app_version (
+  id serial PRIMARY KEY,
+  version_name TEXT NOT NULL,
+  version_code INT NOT NULL,
+  download_url TEXT NOT NULL,
+  release_notes TEXT,
+  force_update BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+INSERT INTO trl_app_version (version_name, version_code, download_url, release_notes)
+VALUES ('1.0.0', 1, '', 'Initial alpha');
 ```
 
 ---
 
-## CATEGORIES IN DB (as of last session)
+## ALPHA DISTRIBUTION (current state)
+
+### APK Details
+- **applicationId:** `com.truresolve.trubrief`
+- **App label:** `TruBrief`
+- **Current version:** `1.0.0` (versionCode: 1) — defined as `_currentVersionCode = 1` in `_AppState`
+- **Signed with:** debug key (fine for alpha, NOT for Play Store)
+- **APK location:** `build/app/outputs/flutter-apk/app-release.apk` (52.1 MB)
+- **Build command:** `flutter build apk --release`
+
+### OTA Update System
+- On app launch, `_checkForUpdate()` queries `trl_app_version` for latest row
+- If `version_code > _currentVersionCode`, shows an update dialog
+- `force_update = true` makes dialog non-dismissible
+- Dialog has **Download** button that opens `download_url` in external browser
+- **To push an update:** build new APK → host it → insert new row in `trl_app_version`
+
+### GitHub Releases
+- Private repo: `https://github.com/jer-rar/Tru-Brief`
+- Upload APK as a release asset → copy direct download URL → put in `trl_app_version.download_url`
+
+### ⚠️ NEXT SESSION — Play Store Setup
+When user says "open tru brief" next session, start with:
+1. Generate a release keystore: `keytool -genkey -v -keystore trubrief-release.jks -keyalias trubrief -keyalg RSA -keysize 2048 -validity 10000`
+2. Configure `android/app/build.gradle.kts` with signing config
+3. Build AAB: `flutter build appbundle --release`
+4. Upload to Google Play Console (Internal Testing track first)
+
+---
+
+## CATEGORIES IN DB
 
 | Category | display_order | Notes |
 |---|---|---|
@@ -74,51 +121,58 @@ ALTER TABLE trl_user_preferences ADD COLUMN IF NOT EXISTS hidden_tabs TEXT[] DEF
 | Politics Brief | ~13 | |
 | Gaming Brief | ~14 | |
 | Crypto Brief | 15 | |
-| Astrology Brief | 160 | NEW — planned |
-| Exploration Brief | 170 | NEW — planned |
+| Astrology Brief | 160 | Added this session |
+| Exploration Brief | 170 | Added this session |
+| Wildlife Brief | 180 | Added this session |
 | Weekly Top | 10 | Virtual |
 
-### SQL to add new categories (run in Supabase SQL editor)
+### SQL to add Astrology, Exploration, Wildlife (use correct columns: no is_active/is_featured)
 ```sql
 -- Astrology Brief
 INSERT INTO trl_categories (name, display_order, is_virtual)
 VALUES ('Astrology Brief', 160, false) ON CONFLICT DO NOTHING;
 
-INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_active, is_featured) VALUES
-('Astrology Zone', 'Astrology Brief', 'https://www.astrologyzone.com/feed/', 'rss', false, true, true),
-('Cafe Astrology', 'Astrology Brief', 'https://cafeastrology.com/feed/', 'rss', false, true, true),
-('AstroStyle', 'Astrology Brief', 'https://astrostyle.com/feed/', 'rss', false, true, true),
-('Chani Nicholas', 'Astrology Brief', 'https://chaninicholas.com/feed/', 'rss', false, true, false),
-('ElsaElsa', 'Astrology Brief', 'https://elsaelsa.com/feed/', 'rss', false, true, false),
-('The Astro Codex', 'Astrology Brief', 'https://theastrocodex.com/feed/', 'rss', false, true, false)
+INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
+('Astrology Zone', 'Astrology Brief', 'https://www.astrologyzone.com/feed/', 'rss', false, true),
+('Cafe Astrology', 'Astrology Brief', 'https://cafeastrology.com/feed/', 'rss', false, true),
+('AstroStyle', 'Astrology Brief', 'https://astrostyle.com/feed/', 'rss', false, true),
+('Chani Nicholas', 'Astrology Brief', 'https://chaninicholas.com/feed/', 'rss', false, false),
+('ElsaElsa', 'Astrology Brief', 'https://elsaelsa.com/feed/', 'rss', false, false),
+('The Astro Codex', 'Astrology Brief', 'https://theastrocodex.com/feed/', 'rss', false, false)
 ON CONFLICT (url) DO NOTHING;
 
 -- Exploration Brief
 INSERT INTO trl_categories (name, display_order, is_virtual)
 VALUES ('Exploration Brief', 170, false) ON CONFLICT DO NOTHING;
 
-INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_active, is_featured) VALUES
-('Atlas Obscura', 'Exploration Brief', 'https://www.atlasobscura.com/feeds/latest', 'rss', false, true, true),
-('Adventure Journal', 'Exploration Brief', 'https://www.adventure-journal.com/feed/', 'rss', false, true, true),
-('Outside Online', 'Exploration Brief', 'https://www.outsideonline.com/feed/', 'rss', false, true, true),
-('Expedition Portal', 'Exploration Brief', 'https://expeditionportal.com/feed/', 'rss', false, true, false),
-('Explorers Web', 'Exploration Brief', 'https://www.explorersweb.com/feed/', 'rss', false, true, false),
-('Condé Nast Traveler', 'Exploration Brief', 'https://www.cntraveler.com/feed/rss', 'rss', false, true, false),
-('Lonely Planet', 'Exploration Brief', 'https://www.lonelyplanet.com/news/feed/', 'rss', false, true, false),
-('National Geographic', 'Exploration Brief', 'https://www.nationalgeographic.com/travel/feed/', 'rss', true, true, false)
+INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
+('Atlas Obscura', 'Exploration Brief', 'https://www.atlasobscura.com/feeds/latest', 'rss', false, true),
+('Adventure Journal', 'Exploration Brief', 'https://www.adventure-journal.com/feed/', 'rss', false, true),
+('Outside Online', 'Exploration Brief', 'https://www.outsideonline.com/feed/', 'rss', false, true),
+('Expedition Portal', 'Exploration Brief', 'https://expeditionportal.com/feed/', 'rss', false, false),
+('Explorers Web', 'Exploration Brief', 'https://www.explorersweb.com/feed/', 'rss', false, false),
+('Condé Nast Traveler', 'Exploration Brief', 'https://www.cntraveler.com/feed/rss', 'rss', false, false),
+('Lonely Planet', 'Exploration Brief', 'https://www.lonelyplanet.com/news/feed/', 'rss', false, false),
+('National Geographic Travel', 'Exploration Brief', 'https://www.nationalgeographic.com/travel/feed/', 'rss', true, false)
+ON CONFLICT (url) DO NOTHING;
+
+-- Wildlife Brief
+INSERT INTO trl_categories (name, display_order, is_virtual)
+VALUES ('Wildlife Brief', 180, false) ON CONFLICT DO NOTHING;
+
+INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
+('National Geographic Animals', 'Wildlife Brief', 'https://www.nationalgeographic.com/animals/feed/', 'rss', false, true),
+('Mongabay', 'Wildlife Brief', 'https://mongabay.com/feed/', 'rss', false, true),
+('Discover Wildlife', 'Wildlife Brief', 'https://www.discoverwildlife.com/feed/', 'rss', false, true),
+('Wildlife Conservation Society', 'Wildlife Brief', 'https://newsroom.wcs.org/News-Releases.aspx?feed=rss', 'rss', false, false),
+('WWF News', 'Wildlife Brief', 'https://www.worldwildlife.org/blog.rss', 'rss', false, false),
+('Defenders of Wildlife', 'Wildlife Brief', 'https://defenders.org/feed/', 'rss', false, false),
+('African Wildlife Foundation', 'Wildlife Brief', 'https://www.awf.org/blog/feed', 'rss', false, false),
+('The Wildlife Society', 'Wildlife Brief', 'https://wildlife.org/feed/', 'rss', false, false),
+('iNaturalist Blog', 'Wildlife Brief', 'https://www.inaturalist.org/blog.atom', 'rss', false, false),
+('Nature.com Wildlife', 'Wildlife Brief', 'https://www.nature.com/subjects/animal-behaviour.rss', 'rss', false, false)
 ON CONFLICT (url) DO NOTHING;
 ```
-
----
-
-## SOURCES SUMMARY
-- Each non-virtual category has ~10 sources
-- **Top 3 free sources** auto-selected by default
-- **Subscription sources** shown at bottom with lock icon
-- Space Brief: NASA, Space.com, Universe Today (top 3 free); SpaceNews, Sky & Telescope, The Planetary Society, Astronomy Magazine; Nature Astronomy, Science Alert (sub)
-- Space.com was moved FROM Science Brief TO Space Brief
-- Mashable was moved to Tech Brief (was under "Tech")
-- Duplicate "Ars Technica" and "ZDNet" under old "Tech" category were deleted
 
 ---
 
@@ -126,66 +180,46 @@ ON CONFLICT (url) DO NOTHING;
 
 ### Article Feed
 - RSS feed fetching from Supabase
-- **Deduplication grouping** (Jaccard similarity, threshold 0.25, intersection >= 2):
-  - Groups similar articles under one card
-  - Shows "Reported by X sources >" orange pill chip
-  - Tapping opens bottom sheet listing all sources with individual links
-  - Bottom sheet has AI upsell: "Get an AI-combined summary of all sources — subscribe to TruBrief AI"
-- **Image display:** articles show thumbnail if available; Local Brief images scraped from Google News
+- **Deduplication grouping** (Jaccard similarity, threshold 0.25, intersection >= 2)
+- **Image display:** articles show thumbnail if available
 - **Interleaved sources:** articles interleaved so same source doesn't dominate feed
 
 ### Local Brief
 - Uses GPS (exact location) or postal code
-- **Multi-query parallel fetch** (3 simultaneous RSS queries):
-  - Query 1: Exact city + state (`"Riverview" "Florida" local news`)
-  - Query 2: County-level (`"Hillsborough County" "Florida" local news`) — covers nearby cities
-  - Query 3: County name without "County" (`"Hillsborough" "Florida" news`) — surfaces major city (Tampa)
+- **Multi-query parallel fetch** (3 simultaneous Google News RSS queries):
+  - Query 1: Exact city + state
+  - Query 2: County-level — covers nearby cities
+  - Query 3: County name without "County" — surfaces major city (e.g., Tampa for Hillsborough)
 - Results merged, deduplicated by URL, sorted newest-first
-- Time window: 72h (extended from 48h for small cities)
-- County stored in `trl_user_preferences.county` — set when GPS is used
-- Google News RSS URL template: `https://news.google.com/rss/search?q=when:72h+{query}&hl=en-US&gl=US&ceid=US:en`
-- Shows city/state label at top of feed
-- Location set in Settings -> Location Settings
-
-### Article Reader
-- In-app browser (InAppWebView)
-- **Paywall detection:** checks for paywall indicators; shows "Article Unavailable" screen with login option
-- **Geo-restriction detection:** detects region-locked content (e.g. BBC iPlayer) — shows unavailable screen
-- **Region-restricted articles filtered from feed** at fetch time
-- Ad blocking via content blockers
-- "Subscribe for AI Summary" banner at top (for non-premium users)
+- Time window: 72h
+- County stored in `trl_user_preferences.county`
 
 ### Settings Screen
-- All three sections are **polished collapsible buttons** (collapsed by default, animated chevron):
-  - **Location Settings** — green-tinted, shows current location status in subtitle, GPS/postal code editor expands below
-  - **My Feed** — orange-tinted gradient, ReorderableListView of active categories
-  - **Available Feeds** — blue-tinted, 2-column grid of all categories
-- **Newsletters** button (purple) navigates to NewslettersScreen
-- **CategoryDetailScreen** (per category):
-  - Toggle 1: "Show in feed" — adds category to Tru Brief aggregated feed + makes tab visible
-  - Toggle 2: "Display Tab" — controls whether the category's tab chip shows in the main tab bar (independent of feed inclusion)
+- Three collapsible sections: Location Settings, My Feed, Available Feeds
+- **Available Feeds grid:** 2-column, alphabetically sorted, eye open/closed icons
+  - Eye icon (right sliver): quick-toggle tab visibility without opening the detail screen
+  - Unselected feed: tapping eye instantly quick-adds with top 3 free sources
+  - Selected feed: tapping eye toggles tab visibility
+- **CategoryDetailScreen** per category:
+  - Toggle 1: "Show in feed" — independent
+  - Toggle 2: "Display Tab" — independent (does NOT auto-off when Show in feed is turned off)
 
-### Display Tab Feature (NEW)
-- Each category has two independent controls:
-  - **Show in feed**: sources included in Tru Brief combined feed
-  - **Display Tab**: tab chip visible in horizontal tab bar on main screen
-- `hidden_tabs TEXT[]` column in `trl_user_preferences` stores categories whose tabs are hidden
-- Allows users to include sources in Tru Brief without cluttering the tab bar
+### Main Tab Bar
+- Shows first 3 visible tabs only
+- **Grid icon (⊞)** to the right of 3rd tab → opens `DraggableScrollableSheet` overlay
+- Overlay shows "My Feeds" grid of remaining tabs (4+), all orange-tinted
+- **Close button** (top right) or tap outside dismisses overlay (`isDismissible: true`)
+- Tapping a feed in overlay navigates to it and closes overlay
 
-### Newsletters Screen
-- Accessible from Settings via purple "Newsletters" button
-- **How it works** explainer card with 6-step overview
-- **My Newsletters** section — shows added newsletters with delete
-- **Popular Newsletters** list (12 curated: Morning Brew, TLDR, The Hustle, 1440, Axios AM, The Pour Over, NextDraft, Milk Road, Dense Discovery, Politico Playbook, The Rundown AI, Finimize)
-- Tapping a curated newsletter opens bottom sheet with:
-  - 4-step guided instructions (Kill the Newsletter flow)
-  - "Step 1 — Open Kill the Newsletter" button (purple, opens browser)
-  - "Step 2 — Go to [Newsletter] to Subscribe" button (opens newsletter signup)
-  - Clearly labels EMAIL ADDRESS (1st field) vs ATOM FEED URL (2nd field)
-  - RSS URL input + "Add to Tru Brief" button
-- **Add Custom Newsletter** button at bottom for unlisted newsletters
-- Saved to `trl_sources` with `category = 'Tru Brief'` and `is_custom = true`
-- Requires `is_custom BOOLEAN DEFAULT false` column on `trl_sources` (already added)
+### Display Tab Feature
+- `hidden_tabs TEXT[]` in `trl_user_preferences`
+- Two independent toggles per category in CategoryDetailScreen
+- Available Feeds grid eye icon reflects hidden state
+
+### OTA Update Checker
+- `_checkForUpdate()` called in `initState` via `addPostFrameCallback`
+- Checks `trl_app_version` table, compares `version_code` to `_currentVersionCode = 1`
+- Shows update dialog with optional "Later" button and "Download" button
 
 ---
 
@@ -197,73 +231,72 @@ ON CONFLICT (url) DO NOTHING;
 
 ---
 
-## ROADMAP (from planning session)
+## ROADMAP
+
+### IMMEDIATE NEXT — Play Store Release
+- [ ] Generate release keystore (`trubrief-release.jks`) — store safely, NEVER commit to git
+- [ ] Configure `android/app/build.gradle.kts` with signingConfigs for release
+- [ ] Build AAB: `flutter build appbundle --release`
+- [ ] Create app in Google Play Console
+- [ ] Upload to Internal Testing track
+- [ ] Fill store listing: icon (512x512), feature graphic (1024x500), screenshots, privacy policy
 
 ### Phase 1 — Category Expansion
-- [ ] **Astrology Brief** — horoscopes, zodiac content (SQL above)
-- [ ] **Exploration Brief** — adventure, travel, discovery (SQL above)
-- [ ] **Pet Brief subcategories**: Dogs, Cats, Reptiles, Aquarium (Fish), Small Animals
-- [ ] **Gaming Brief subcategories**: Video Games, Tabletop Games (distinguish from gambling)
+- [ ] **Astrology Brief** SQL (above) — run when ready
+- [ ] **Exploration Brief** SQL (above) — run when ready
+- [ ] **Wildlife Brief** SQL (above) — run when ready
+- [ ] **Pet Brief subcategories**: Dogs, Cats, Reptiles, Aquarium, Small Animals
+- [ ] **Gaming Brief subcategories**: Video Games, Tabletop (distinguish from gambling)
 
 ### Phase 2 — International Support
-- [ ] Rename "Zip Code" → "Postal Code" globally (for international users) ✅ DONE
-- [ ] Show resolved city/region name next to entered postal code ✅ DONE
-- [ ] National News auto-adapts to user's country based on postal code (French code → French news)
-- [ ] Fallback for invalid postal codes (prompt re-entry or default to IP-based location)
-- [ ] Support multi-format postal codes (Canada: A1A 1A1, UK: SW1A 1AA)
+- [ ] National News auto-adapts to user's country based on postal code
+- [ ] Fallback for invalid postal codes
+- [ ] Support multi-format postal codes (Canada, UK)
 
-### Phase 3 — UX Improvements
-- [ ] **Display Tab toggle** in CategoryDetailScreen ✅ DONE
-- [ ] Blank tabs root cause fix (ensure content loads on all tabs)
-- [ ] Verify all RSS source URLs are live and returning content
-- [ ] Cross-reference DB sources vs. expected list (run audit queries)
+### Phase 3 — Quality / QA
+- [ ] Blank tabs root cause fix
+- [ ] Verify all RSS source URLs are live
+- [ ] Cross-reference DB sources vs. expected list
 
-### Phase 4 — Subcategories
-- [ ] Schema changes to support subcategories in DB
-- [ ] "All" checkbox for subcategories (default selected; unchecking deselects all)
-- [ ] Per-subcategory toggles in category settings
-
-### Phase 5 — Deployment & Monitoring
-- [ ] Analytics for category usage, tab visibility, location adoption
+### Phase 4 — AI / Monetization
+- [ ] AI summary feature (OpenAI integration, paid users only)
 - [ ] Push notifications
 - [ ] iOS testing
-- [ ] AI summary feature (OpenAI integration, paid users only)
 
 ---
 
-## KNOWN ISSUES / TODO
-- [ ] Local Brief images: Google News often returns Google logo instead of article thumbnail — needs og:image scraping
+## KNOWN ISSUES
+- [ ] Local Brief images: Google News returns Google logo — needs og:image scraping
 - [ ] Weather Brief and Politics Brief RSS URLs need live verification
-- [ ] No push notifications yet
-- [ ] iOS not tested
-- [ ] AI summary feature not built yet — OpenAI or similar, paid users only
-- [ ] Gizmodo still in Tech Brief — consider replacing with The Register or ExtremeTech
-- [ ] The Next Web still in Tech Brief — occasionally runs off-topic content
-- [ ] International news: French postal code 38950 showed US news — needs country-aware API
+- [ ] International news: country-aware API not yet implemented
+- [ ] `trubrief-release.jks` keystore not yet created (needed for Play Store)
 
 ---
 
 ## IMPORTANT CODE LOCATIONS (lib/main.dart)
-- `_deduplicateByTopic()` — Jaccard dedup/grouping (~line 440)
-- `_showSourcesBottomSheet()` — multi-source modal with AI upsell (~line 748)
-- `_fetchGoogleNewsLocal()` — multi-query parallel Local Brief fetch (~line 306)
-- `_fetchGoogleNewsQuery()` — single RSS query helper (~line 358)
-- `SourceSettingsScreen` class — full settings UI (~line 1427)
-- `NewslettersScreen` class — newsletters feature (~line 2380)
-- `CategoryDetailScreen` class — per-category source management + two toggles (~line 2840)
-- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 3020)
-- Local Brief fetch uses `_city`, `_state`, `_county` to build parallel Google News RSS queries
-- `_hiddenTabs` — Set of categories hidden from tab bar but still active in feed
+- `_currentVersionCode` — static const int, increment each release (~line 87)
+- `_checkForUpdate()` — OTA update checker (~line 89)
+- `_fetchGoogleNewsLocal()` — multi-query parallel Local Brief fetch (~line 365)
+- `_fetchGoogleNewsQuery()` — single RSS query helper (~line 417)
+- `_deduplicateByTopic()` — Jaccard dedup/grouping (~line 495)
+- `_showSourcesBottomSheet()` — multi-source modal with AI upsell (~line 800)
+- `SourceSettingsScreen` class — full settings UI (~line 1480)
+- `CategoryDetailScreen` class — per-category source management + two independent toggles (~line 3030)
+- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 3380)
+- `_hiddenTabs` — Set of categories hidden from tab bar
 
 ---
 
 ## GIT CHECKPOINTS
 | Commit | Description |
 |---|---|
-| initial | First commit, 145 files |
-| 87abdf3 | Settings UI refactor: My Feed Tabs + Grid + CategoryDetailScreen |
-| 5fb9509 | Newsletters screen, collapsible settings sections, Tech Brief source cleanup, UI polish |
-| 9670b68 | Local Brief multi-query parallel fetch (city + county + metro) |
+| initial | First commit |
+| 87abdf3 | Settings UI refactor |
+| 5fb9509 | Newsletters screen, collapsible settings, Tech Brief cleanup |
+| 9670b68 | Local Brief multi-query parallel fetch |
+| 9d35669 | Postal code rename, display tab, hidden tabs, TRUBRIEF.md overhaul |
+| 1764bbf | Fix overlay dismiss (removed GestureDetector wrapper) |
+| 61cf59c | applicationId → com.truresolve.trubrief, OTA update checker, alpha APK built |
 
 ---
 
@@ -274,6 +307,7 @@ ON CONFLICT (url) DO NOTHING;
 - Top 3 free sources auto-selected; subscription sources at bottom
 - Article deduplication: group by topic, show "Reported by X sources", never hide/discard
 - AI features reserved for paid subscribers
-- User runs SQL directly in Supabase SQL editor — always provide exact SQL + order to run
-- When DB changes needed: tell user the exact SQL statements clearly
+- User runs SQL directly in Supabase SQL editor — always provide exact SQL
+- `trl_sources` correct columns: `name, category, url, type, requires_subscription, is_preset` (NO `is_active`, NO `is_featured`)
 - International inclusivity: use "Postal Code" not "Zip Code" in UI
+- **NEVER commit the release keystore file** (`trubrief-release.jks`) to git
