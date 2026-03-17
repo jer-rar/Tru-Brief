@@ -81,6 +81,65 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
     _fetchArticles();
     _fetchNewArticlesFromSources();
     _archiveOldArticles();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  static const int _currentVersionCode = 1;
+
+  Future<void> _checkForUpdate() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('trl_app_version')
+          .select()
+          .order('version_code', ascending: false)
+          .limit(1);
+      if (rows.isEmpty) return;
+      final latest = rows.first;
+      final latestCode = (latest['version_code'] as num?)?.toInt() ?? 0;
+      final latestName = latest['version_name']?.toString() ?? '';
+      final downloadUrl = latest['download_url']?.toString() ?? '';
+      final notes = latest['release_notes']?.toString() ?? '';
+      final force = latest['force_update'] == true;
+      if (latestCode <= _currentVersionCode || downloadUrl.isEmpty) return;
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: !force,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Update Available', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Version $latestName is ready.', style: const TextStyle(color: Colors.white70)),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(notes, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+              ],
+            ],
+          ),
+          actions: [
+            if (!force)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Later', style: TextStyle(color: Colors.white38)),
+              ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final uri = Uri.tryParse(downloadUrl);
+                if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+              },
+              child: const Text('Download', style: TextStyle(color: Color(0xFFFF6200), fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('Update check error: $e');
+    }
   }
 
   Future<void> _fetchSavedArticles() async {
@@ -3001,7 +3060,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
     super.initState();
     _selectedSources = List<String>.from(widget.selectedSources);
     _isInFeed = widget.isInFeed;
-    _isTabVisible = widget.isInFeed && widget.isTabVisible;
+    _isTabVisible = widget.isTabVisible;
     if (_isInFeed) {
       final freeSources = widget.sources.where((s) => s['requires_subscription'] != true).toList();
       final top3 = freeSources.take(3).map((s) => s['id'].toString()).toList();
@@ -3102,11 +3161,8 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                       value: _isInFeed,
                       activeColor: const Color(0xFFFF6200),
                       onChanged: (val) {
-                        setState(() {
-                          _isInFeed = val;
-                          if (!val) _isTabVisible = false;
-                        });
-                        widget.onChanged(_selectedSources, val, val ? _isTabVisible : false);
+                        setState(() => _isInFeed = val);
+                        widget.onChanged(_selectedSources, val, _isTabVisible);
                       },
                     ),
                   ],
