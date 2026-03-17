@@ -1026,83 +1026,176 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
         backgroundColor: const Color(0xFF1C1C1E),
         child: Column(
           children: [
-            Container(
-              height: 48,
-              margin: const EdgeInsets.only(top: 12, bottom: 4),
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _selectedCategories.where((c) => !_hiddenTabs.contains(c)).length,
-                itemBuilder: (context, index) {
-                  final cat = _selectedCategories.where((c) => !_hiddenTabs.contains(c)).toList()[index];
-                  final isSelected = _selectedCategory == cat;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: InkWell(
-                      onTap: () {
-                        setState(() {
-                          _selectedCategory = cat;
-                          _loading = true;
-                        });
-                        _fetchArticles();
-                      },
+            Builder(builder: (context) {
+              final visibleTabs = _selectedCategories.where((c) => !_hiddenTabs.contains(c)).toList();
+              final displayTabs = visibleTabs.take(3).toList();
+              final hasMore = visibleTabs.length > 3;
+
+              Widget _tabChip(String cat) {
+                final isSelected = _selectedCategory == cat;
+                return InkWell(
+                  onTap: () {
+                    setState(() { _selectedCategory = cat; _loading = true; });
+                    _fetchArticles();
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
                       borderRadius: BorderRadius.circular(8),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1C1C1E),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isSelected ? const Color(0xFFFF6200) : Colors.white24,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: () {
-                          final parts = cat.split(' ');
-                          if (parts.length >= 2) {
-                            return RichText(
-                              text: TextSpan(
-                                children: [
-                                  TextSpan(
-                                    text: parts[0],
-                                    style: TextStyle(
-                                      color: isSelected ? Colors.white : Colors.white38,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 13,
-                                      letterSpacing: -0.5,
-                                    ),
-                                  ),
-                                  TextSpan(
-                                    text: ' ${parts.skip(1).join(' ')}',
-                                    style: TextStyle(
-                                      color: isSelected ? const Color(0xFFFF6200) : const Color(0xFFFF6200).withValues(alpha: 0.4),
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 13,
-                                      letterSpacing: -0.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          return Text(
-                            cat.toUpperCase(),
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white60,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 11,
-                              letterSpacing: 0.8,
-                            ),
-                          );
-                        }(),
+                      border: Border.all(
+                        color: isSelected ? const Color(0xFFFF6200) : Colors.white24,
+                        width: 1.5,
                       ),
                     ),
-                  );
-                },
-              ),
-            ),
+                    child: () {
+                      final parts = cat.split(' ');
+                      if (parts.length >= 2) {
+                        return RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(text: parts[0], style: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: -0.5)),
+                              TextSpan(text: ' ${parts.skip(1).join(' ')}', style: TextStyle(color: isSelected ? const Color(0xFFFF6200) : const Color(0xFFFF6200).withValues(alpha: 0.4), fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: -0.5)),
+                            ],
+                          ),
+                        );
+                      }
+                      return Text(cat.toUpperCase(), style: TextStyle(color: isSelected ? Colors.white : Colors.white60, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.8));
+                    }(),
+                  ),
+                );
+              }
+
+              return Container(
+                height: 48,
+                margin: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16),
+                    ...displayTabs.map((cat) => Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: _tabChip(cat),
+                    )),
+                    if (hasMore)
+                      InkWell(
+                        onTap: () {
+                          showModalBottomSheet(
+                            context: context,
+                            backgroundColor: Colors.transparent,
+                            isScrollControlled: true,
+                            isDismissible: true,
+                            enableDrag: true,
+                            builder: (ctx) => DraggableScrollableSheet(
+                              initialChildSize: 0.6,
+                              minChildSize: 0.4,
+                              maxChildSize: 0.9,
+                              builder: (_, controller) => Container(
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF111111),
+                                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                                ),
+                                child: Column(
+                                  children: [
+                                    const SizedBox(height: 10),
+                                    Container(width: 36, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                                    const SizedBox(height: 16),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      child: Row(
+                                        children: [
+                                          const Expanded(
+                                            child: Text('My Feeds', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: 0.2)),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () => Navigator.pop(context),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF1C1C1E),
+                                                borderRadius: BorderRadius.circular(20),
+                                                border: Border.all(color: Colors.white12),
+                                              ),
+                                              child: const Text('Close', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600)),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Expanded(
+                                      child: GridView.builder(
+                                        controller: controller,
+                                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                          crossAxisCount: 3,
+                                          mainAxisSpacing: 10,
+                                          crossAxisSpacing: 10,
+                                          childAspectRatio: 2.0,
+                                        ),
+                                        itemCount: visibleTabs.length - 3,
+                                        itemBuilder: (ctx, i) {
+                                          final cat = visibleTabs[i + 3];
+                                          final isSelected = _selectedCategory == cat;
+                                          final parts = cat.split(' ');
+                                          return GestureDetector(
+                                            onTap: () {
+                                              Navigator.pop(ctx);
+                                              setState(() { _selectedCategory = cat; _loading = true; });
+                                              _fetchArticles();
+                                            },
+                                            child: AnimatedContainer(
+                                              duration: const Duration(milliseconds: 150),
+                                              alignment: Alignment.center,
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: isSelected ? const Color(0xFF3A2010) : const Color(0xFF2C1C16),
+                                                borderRadius: BorderRadius.circular(10),
+                                                border: Border.all(
+                                                  color: isSelected ? const Color(0xFFFF6200) : const Color(0xFFFF6200).withValues(alpha: 0.35),
+                                                  width: isSelected ? 2.0 : 1.5,
+                                                ),
+                                              ),
+                                              child: parts.length >= 2
+                                                ? RichText(
+                                                    textAlign: TextAlign.center,
+                                                    text: TextSpan(children: [
+                                                      TextSpan(text: '${parts[0]}\n', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: -0.3)),
+                                                      TextSpan(text: parts.skip(1).join(' '), style: const TextStyle(color: Color(0xFFFF6200), fontWeight: FontWeight.w800, fontSize: 11)),
+                                                    ]),
+                                                  )
+                                                : Text(cat, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11), textAlign: TextAlign.center),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1C1C1E),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white24, width: 1.5),
+                          ),
+                          child: const Icon(Icons.grid_view_rounded, size: 18, color: Colors.white54),
+                        ),
+                      ),
+                    const SizedBox(width: 16),
+                  ],
+                ),
+              );
+            }),
             if ((_selectedCategory == 'Local Brief' || _selectedCategory == 'National Brief') && _locationType == 'none')
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2049,7 +2142,8 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                             ),
                             itemCount: _categories.where((c) => !_virtualCategories.contains(c)).length,
                             itemBuilder: (context, index) {
-                              final cat = _categories.where((c) => !_virtualCategories.contains(c)).toList()[index];
+                              final sortedCats = (_categories.where((c) => !_virtualCategories.contains(c)).toList()..sort((a, b) => a.compareTo(b)));
+                              final cat = sortedCats[index];
                               final bool isInFeed = _selectedCategories.contains(cat);
                               final bool isTruBrief = cat == 'Tru Brief';
                               final shortCat = cat.replaceAll(' Brief', '').replaceAll(' News', '').trim();
@@ -2058,70 +2152,113 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                 return sCat == cat || sCat == shortCat || sCat == '$shortCat Brief' || sCat == '$shortCat News';
                               }).toList();
                               final activeCount = catSources.where((s) => _selectedSources.contains(s['id'].toString())).length;
-                              return GestureDetector(
-                                onTap: () {
-                                  Navigator.push(context, MaterialPageRoute(
-                                    builder: (_) => CategoryDetailScreen(
-                                      category: cat,
-                                      sources: catSources,
-                                      selectedSources: List<String>.from(_selectedSources),
-                                      isInFeed: isInFeed,
-                                      isTabVisible: !_hiddenTabs.contains(cat),
-                                      onChanged: (newSources, inFeed, tabVisible) {
-                                        setState(() {
-                                          _selectedSources = newSources;
-                                          if (inFeed && !_selectedCategories.contains(cat)) {
-                                            _selectedCategories.add(cat);
-                                          } else if (!inFeed) {
-                                            _selectedCategories.remove(cat);
-                                            _hiddenTabs.remove(cat);
-                                          }
-                                          if (inFeed) {
-                                            if (tabVisible) {
-                                              _hiddenTabs.remove(cat);
-                                            } else {
-                                              _hiddenTabs.add(cat);
-                                            }
-                                          }
-                                        });
-                                        _savePreferences();
-                                      },
-                                    ),
-                                  ));
-                                },
+                              final bool isTabHidden = _hiddenTabs.contains(cat);
+                              final bool isActive = isInFeed && !isTabHidden;
+                              return ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: isInFeed ? const Color(0xFF2C1C16) : const Color(0xFF1C1C1E),
+                                    color: isActive ? const Color(0xFF2C1C16) : const Color(0xFF1C1C1E),
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: isInFeed ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10),
+                                    border: Border.all(color: isActive ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                                  child: Row(
                                     children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              cat,
-                                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: isInFeed ? Colors.white : Colors.white70),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(context, MaterialPageRoute(
+                                              builder: (_) => CategoryDetailScreen(
+                                                category: cat,
+                                                sources: catSources,
+                                                selectedSources: List<String>.from(_selectedSources),
+                                                isInFeed: isInFeed,
+                                                isTabVisible: !isTabHidden,
+                                                onChanged: (newSources, inFeed, tabVisible) {
+                                                  setState(() {
+                                                    _selectedSources = newSources;
+                                                    if (inFeed && !_selectedCategories.contains(cat)) {
+                                                      _selectedCategories.add(cat);
+                                                    } else if (!inFeed) {
+                                                      _selectedCategories.remove(cat);
+                                                      _hiddenTabs.remove(cat);
+                                                    }
+                                                    if (inFeed) {
+                                                      if (tabVisible) {
+                                                        _hiddenTabs.remove(cat);
+                                                      } else {
+                                                        _hiddenTabs.add(cat);
+                                                      }
+                                                    }
+                                                  });
+                                                  _savePreferences();
+                                                },
+                                              ),
+                                            ));
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  cat,
+                                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: isActive ? Colors.white : Colors.white70),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  '$activeCount source${activeCount == 1 ? '' : 's'} active',
+                                                  style: TextStyle(fontSize: 11, color: isActive ? Colors.white54 : Colors.white24),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          if (isTruBrief)
-                                            const Icon(Icons.push_pin, size: 12, color: Color(0xFFFF6200))
-                                          else if (isInFeed)
-                                            const Icon(Icons.check_circle, size: 14, color: Color(0xFFFF6200))
-                                          else
-                                            const Icon(Icons.add_circle_outline, size: 14, color: Colors.white24),
-                                        ],
+                                        ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$activeCount source${activeCount == 1 ? '' : 's'} active',
-                                        style: TextStyle(fontSize: 11, color: isInFeed ? Colors.white54 : Colors.white24),
+                                      GestureDetector(
+                                        onTap: () {
+                                          if (isTruBrief) return;
+                                          if (!isInFeed) {
+                                            // Quick-add: enable feed with top 3 free sources
+                                            final freeSources = catSources.where((s) => s['requires_subscription'] != true).toList();
+                                            final top3 = freeSources.take(3).map((s) => s['id'].toString()).toList();
+                                            setState(() {
+                                              _selectedCategories.add(cat);
+                                              _hiddenTabs.remove(cat);
+                                              for (final id in top3) {
+                                                if (!_selectedSources.contains(id)) _selectedSources.add(id);
+                                              }
+                                            });
+                                          } else {
+                                            // Toggle tab visibility
+                                            setState(() {
+                                              if (isTabHidden) {
+                                                _hiddenTabs.remove(cat);
+                                              } else {
+                                                _hiddenTabs.add(cat);
+                                              }
+                                            });
+                                          }
+                                          _savePreferences();
+                                        },
+                                        child: Container(
+                                          width: 44,
+                                          height: double.infinity,
+                                          decoration: BoxDecoration(
+                                            border: Border(left: BorderSide(color: isActive ? const Color(0xFFFF6200).withValues(alpha: 0.2) : Colors.white10)),
+                                            color: Colors.transparent,
+                                          ),
+                                          child: isTruBrief
+                                              ? const Icon(Icons.push_pin, size: 14, color: Color(0xFFFF6200))
+                                              : Icon(
+                                                  isInFeed && !isTabHidden ? Icons.visibility : Icons.visibility_off,
+                                                  size: 16,
+                                                  color: isInFeed && !isTabHidden ? const Color(0xFFFF6200) : Colors.white24,
+                                                ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -2864,7 +3001,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
     super.initState();
     _selectedSources = List<String>.from(widget.selectedSources);
     _isInFeed = widget.isInFeed;
-    _isTabVisible = widget.isTabVisible;
+    _isTabVisible = widget.isInFeed && widget.isTabVisible;
     if (_isInFeed) {
       final freeSources = widget.sources.where((s) => s['requires_subscription'] != true).toList();
       final top3 = freeSources.take(3).map((s) => s['id'].toString()).toList();
@@ -2965,36 +3102,37 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                       value: _isInFeed,
                       activeColor: const Color(0xFFFF6200),
                       onChanged: (val) {
-                        setState(() => _isInFeed = val);
-                        widget.onChanged(_selectedSources, val, _isTabVisible);
+                        setState(() {
+                          _isInFeed = val;
+                          if (!val) _isTabVisible = false;
+                        });
+                        widget.onChanged(_selectedSources, val, val ? _isTabVisible : false);
                       },
                     ),
                   ],
                 ),
-                if (_isInFeed) ...[
-                  const Divider(color: Colors.white10, height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Display Tab', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-                            const Text('Show as a tab on the main screen', style: TextStyle(fontSize: 12, color: Colors.white54)),
-                          ],
-                        ),
+                const Divider(color: Colors.white10, height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Display Tab', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                          const Text('Show as a tab on the main screen', style: TextStyle(fontSize: 12, color: Colors.white54)),
+                        ],
                       ),
-                      Switch(
-                        value: _isTabVisible,
-                        activeColor: const Color(0xFFFF6200),
-                        onChanged: (val) {
-                          setState(() => _isTabVisible = val);
-                          widget.onChanged(_selectedSources, _isInFeed, val);
-                        },
-                      ),
-                    ],
-                  ),
-                ],
+                    ),
+                    Switch(
+                      value: _isTabVisible,
+                      activeColor: const Color(0xFFFF6200),
+                      onChanged: (val) {
+                        setState(() => _isTabVisible = val);
+                        widget.onChanged(_selectedSources, _isInFeed, val);
+                      },
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

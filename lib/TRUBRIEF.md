@@ -26,7 +26,7 @@
 
 ## DATABASE TABLES (Supabase)
 - **`trl_categories`** — columns: `name`, `display_order`, `is_virtual`
-- **`trl_sources`** — columns: `id`, `name`, `category`, `url`, `type` (='rss'), `requires_subscription`, `created_at`, `is_active`, `is_featured`
+- **`trl_sources`** — columns: `id`, `name`, `category`, `url`, `type` (='rss'), `requires_subscription`, `is_preset`, `is_custom`, `created_at`, `city`, `state`
 - **`trl_user_preferences`** — stores per-user settings (selected categories, sources, location, hidden tabs)
 - **`trl_articles`** — cached articles, has `source_id` FK -> `trl_sources.id`
 
