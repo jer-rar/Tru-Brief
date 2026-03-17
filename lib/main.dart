@@ -70,6 +70,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
   String? _city;
   String? _state;
   String? _county;
+  Set<String> _hiddenTabs = {};
 
   @override
   void initState() {
@@ -243,6 +244,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
           _city = prefs['city'];
           _state = prefs['state'];
           _county = prefs['county'];
+          _hiddenTabs = Set<String>.from(prefs['hidden_tabs'] ?? []);
           _selectedSources = List<String>.from(prefs['selected_sources'] ?? []);
           
           final List<String> savedOrder = List<String>.from(prefs['selected_categories'] ?? []);
@@ -1030,9 +1032,9 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: _selectedCategories.length,
+                itemCount: _selectedCategories.where((c) => !_hiddenTabs.contains(c)).length,
                 itemBuilder: (context, index) {
-                  final cat = _selectedCategories[index];
+                  final cat = _selectedCategories.where((c) => !_hiddenTabs.contains(c)).toList()[index];
                   final isSelected = _selectedCategory == cat;
                   return Padding(
                     padding: const EdgeInsets.only(right: 10),
@@ -1442,6 +1444,8 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
   List<String> _selectedSources = [];
   String _locationType = 'none'; // 'exact', 'zip', 'none'
   String? _zipCode;
+  String? _city;
+  Set<String> _hiddenTabs = {};
   final TextEditingController _zipController = TextEditingController();
   bool _showLocationEditor = false;
   bool _myFeedExpanded = false;
@@ -1542,6 +1546,8 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
 
           _locationType = prefs['location_type'] ?? 'none';
           _zipCode = prefs['zip_code'];
+          _city = prefs['city'];
+          _hiddenTabs = Set<String>.from(prefs['hidden_tabs'] ?? []);
           _zipController.text = _zipCode ?? '';
           _showLocationEditor = _locationType == 'none';
 
@@ -1617,6 +1623,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
         'selected_categories': orderedSelections,
         'location_type': _locationType,
         'zip_code': _zipCode,
+        'hidden_tabs': _hiddenTabs.toList(),
         'updated_at': DateTime.now().toIso8601String(),
       };
       if (city != null) data['city'] = city;
@@ -1696,7 +1703,11 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                           children: [
                                             const Text('Location Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
                                             Text(
-                                              _locationType == 'exact' ? 'Using exact GPS location' : (_locationType == 'zip' ? 'Using zip code: $_zipCode' : 'Location not set'),
+                                              _locationType == 'exact'
+                                                  ? 'GPS location${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
+                                                  : (_locationType == 'zip'
+                                                      ? 'Postal code $_zipCode${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
+                                                      : 'Location not set'),
                                               style: TextStyle(fontSize: 11, color: _locationType != 'none' ? const Color(0xFFFF6200).withValues(alpha: 0.7) : Colors.white38),
                                             ),
                                           ],
@@ -1747,6 +1758,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                               setState(() {
                                                 _locationType = 'exact';
                                                 _zipCode = place.postalCode;
+                                                _city = place.locality;
                                                 _showLocationEditor = false;
                                               });
                                               _savePreferences(city: place.locality, state: place.administrativeArea, county: place.subAdministrativeArea);
@@ -1780,7 +1792,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                             child: TextField(
                                               controller: _zipController,
                                               decoration: const InputDecoration(
-                                                hintText: 'Enter Zip Code',
+                                                hintText: 'Enter Postal Code',
                                                 isDense: true,
                                                 border: OutlineInputBorder(),
                                               ),
@@ -1789,14 +1801,28 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                           ),
                                           const SizedBox(width: 12),
                                           ElevatedButton(
-                                            onPressed: () {
-                                              if (_zipController.text.length == 5) {
+                                            onPressed: () async {
+                                              final code = _zipController.text.trim();
+                                              if (code.length >= 3) {
                                                 setState(() {
                                                   _locationType = 'zip';
-                                                  _zipCode = _zipController.text;
+                                                  _zipCode = code;
                                                   _showLocationEditor = false;
                                                 });
-                                                _savePreferences();
+                                                String? resolvedCity;
+                                                String? resolvedState;
+                                                try {
+                                                  final locs = await locationFromAddress(code);
+                                                  if (locs.isNotEmpty) {
+                                                    final marks = await placemarkFromCoordinates(locs.first.latitude, locs.first.longitude);
+                                                    if (marks.isNotEmpty) {
+                                                      resolvedCity = marks.first.locality;
+                                                      resolvedState = marks.first.administrativeArea;
+                                                      if (mounted) setState(() => _city = resolvedCity);
+                                                    }
+                                                  }
+                                                } catch (_) {}
+                                                _savePreferences(city: resolvedCity, state: resolvedState);
                                               }
                                             },
                                             style: ElevatedButton.styleFrom(
@@ -1922,10 +1948,18 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                               sources: catSources,
                                               selectedSources: List<String>.from(_selectedSources),
                                               isInFeed: true,
-                                              onChanged: (newSources, inFeed) {
+                                              isTabVisible: !_hiddenTabs.contains(cat),
+                                              onChanged: (newSources, inFeed, tabVisible) {
                                                 setState(() {
                                                   _selectedSources = newSources;
-                                                  if (!inFeed) _selectedCategories.remove(cat);
+                                                  if (!inFeed) {
+                                                    _selectedCategories.remove(cat);
+                                                    _hiddenTabs.remove(cat);
+                                                  } else if (tabVisible) {
+                                                    _hiddenTabs.remove(cat);
+                                                  } else {
+                                                    _hiddenTabs.add(cat);
+                                                  }
                                                 });
                                                 _savePreferences();
                                               },
@@ -2032,13 +2066,22 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                       sources: catSources,
                                       selectedSources: List<String>.from(_selectedSources),
                                       isInFeed: isInFeed,
-                                      onChanged: (newSources, inFeed) {
+                                      isTabVisible: !_hiddenTabs.contains(cat),
+                                      onChanged: (newSources, inFeed, tabVisible) {
                                         setState(() {
                                           _selectedSources = newSources;
                                           if (inFeed && !_selectedCategories.contains(cat)) {
                                             _selectedCategories.add(cat);
                                           } else if (!inFeed) {
                                             _selectedCategories.remove(cat);
+                                            _hiddenTabs.remove(cat);
+                                          }
+                                          if (inFeed) {
+                                            if (tabVisible) {
+                                              _hiddenTabs.remove(cat);
+                                            } else {
+                                              _hiddenTabs.add(cat);
+                                            }
                                           }
                                         });
                                         _savePreferences();
@@ -2794,7 +2837,8 @@ class CategoryDetailScreen extends StatefulWidget {
   final List<dynamic> sources;
   final List<String> selectedSources;
   final bool isInFeed;
-  final void Function(List<String> newSources, bool inFeed) onChanged;
+  final bool isTabVisible;
+  final void Function(List<String> newSources, bool inFeed, bool tabVisible) onChanged;
 
   const CategoryDetailScreen({
     super.key,
@@ -2802,6 +2846,7 @@ class CategoryDetailScreen extends StatefulWidget {
     required this.sources,
     required this.selectedSources,
     required this.isInFeed,
+    this.isTabVisible = true,
     required this.onChanged,
   });
 
@@ -2812,12 +2857,14 @@ class CategoryDetailScreen extends StatefulWidget {
 class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
   late List<String> _selectedSources;
   late bool _isInFeed;
+  late bool _isTabVisible;
 
   @override
   void initState() {
     super.initState();
     _selectedSources = List<String>.from(widget.selectedSources);
     _isInFeed = widget.isInFeed;
+    _isTabVisible = widget.isTabVisible;
     if (_isInFeed) {
       final freeSources = widget.sources.where((s) => s['requires_subscription'] != true).toList();
       final top3 = freeSources.take(3).map((s) => s['id'].toString()).toList();
@@ -2835,7 +2882,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
         _selectedSources.remove(id);
       }
     });
-    widget.onChanged(_selectedSources, _isInFeed);
+    widget.onChanged(_selectedSources, _isInFeed, _isTabVisible);
   }
 
   void _openLogin(dynamic src) {
@@ -2901,25 +2948,53 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: _isInFeed ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white10),
             ),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Show in feed', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                          Text('Include ${widget.category} sources in Tru Brief', style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _isInFeed,
+                      activeColor: const Color(0xFFFF6200),
+                      onChanged: (val) {
+                        setState(() => _isInFeed = val);
+                        widget.onChanged(_selectedSources, val, _isTabVisible);
+                      },
+                    ),
+                  ],
+                ),
+                if (_isInFeed) ...[
+                  const Divider(color: Colors.white10, height: 20),
+                  Row(
                     children: [
-                      Text('Show in feed', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
-                      Text('Adds ${widget.category} tab to your home feed', style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Display Tab', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+                            const Text('Show as a tab on the main screen', style: TextStyle(fontSize: 12, color: Colors.white54)),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: _isTabVisible,
+                        activeColor: const Color(0xFFFF6200),
+                        onChanged: (val) {
+                          setState(() => _isTabVisible = val);
+                          widget.onChanged(_selectedSources, _isInFeed, val);
+                        },
+                      ),
                     ],
                   ),
-                ),
-                Switch(
-                  value: _isInFeed,
-                  activeColor: const Color(0xFFFF6200),
-                  onChanged: (val) {
-                    setState(() => _isInFeed = val);
-                    widget.onChanged(_selectedSources, val);
-                  },
-                ),
+                ],
               ],
             ),
           ),
