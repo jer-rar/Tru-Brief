@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,7 +34,233 @@ class TruBriefApp extends StatelessWidget {
         cardColor: const Color(0xFF1C1C1E),
         appBarTheme: const AppBarTheme(backgroundColor: Colors.black, elevation: 0),
       ),
-      home: const ArticlesScreen(),
+      home: const _AuthGate(),
+    );
+  }
+}
+
+class _AuthGate extends StatefulWidget {
+  const _AuthGate();
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(child: CircularProgressIndicator(color: Color(0xFFFF6200))),
+          );
+        }
+        final session = Supabase.instance.client.auth.currentSession;
+        if (session != null) {
+          return const ArticlesScreen();
+        }
+        return const LoginScreen();
+      },
+    );
+  }
+}
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _emailCtrl = TextEditingController(text: kDebugMode ? 'jdr6382@gmail.com' : '');
+  final _passwordCtrl = TextEditingController(text: kDebugMode ? 'Jerd6382!' : '');
+  bool _isLogin = true;
+  bool _loading = false;
+  bool _obscurePassword = true;
+  String? _error;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text.trim();
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Please enter your email and password.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+    try {
+      if (_isLogin) {
+        await Supabase.instance.client.auth.signInWithPassword(email: email, password: password);
+      } else {
+        await Supabase.instance.client.auth.signUp(email: email, password: password);
+      }
+    } on AuthException catch (e) {
+      if (mounted) setState(() { _error = e.message; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Something went wrong. Please try again.'; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 24),
+                Center(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Tru',
+                          style: TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: -1.5,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Brief',
+                          style: TextStyle(
+                            fontSize: 38,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFFFF6200),
+                            letterSpacing: -1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Center(
+                  child: Text(
+                    'Your news, your way.',
+                    style: TextStyle(color: Colors.white38, fontSize: 14, letterSpacing: 0.3),
+                  ),
+                ),
+                const SizedBox(height: 48),
+                Text(
+                  _isLogin ? 'Welcome back' : 'Create your account',
+                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _isLogin ? 'Sign in to continue' : 'Free forever — no credit card needed',
+                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+                ),
+                const SizedBox(height: 28),
+                TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: const Color(0xFF1C1C1E),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    prefixIcon: const Icon(Icons.email_outlined, color: Colors.white38, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _passwordCtrl,
+                  obscureText: _obscurePassword,
+                  style: const TextStyle(color: Colors.white),
+                  onSubmitted: (_) => _submit(),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: const Color(0xFF1C1C1E),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.white38, size: 20),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: Colors.white38, size: 20),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13))),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6200),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    child: _loading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : Text(_isLogin ? 'Sign In' : 'Create Account', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Center(
+                  child: GestureDetector(
+                    onTap: () => setState(() { _isLogin = !_isLogin; _error = null; }),
+                    child: RichText(
+                      text: TextSpan(
+                        children: [
+                          TextSpan(
+                            text: _isLogin ? 'Don\'t have an account? ' : 'Already have an account? ',
+                            style: const TextStyle(color: Colors.white38, fontSize: 14),
+                          ),
+                          TextSpan(
+                            text: _isLogin ? 'Sign up free' : 'Sign in',
+                            style: const TextStyle(color: Color(0xFFFF6200), fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -45,9 +273,7 @@ class ArticlesScreen extends StatefulWidget {
 }
 
 class _ArticlesScreenState extends State<ArticlesScreen> {
-  // Bypasses null auth for development/admin persistence
-  // Uses a valid UUID string format for database compatibility
-  String? get _effectiveUserId => Supabase.instance.client.auth.currentUser?.id ?? '00000000-0000-4000-a000-000000000000';
+  String? get _effectiveUserId => Supabase.instance.client.auth.currentUser?.id;
 
   List<dynamic> _articles = [];
   List<dynamic> _allSources = [];
@@ -72,6 +298,9 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
   String? _county;
   Set<String> _hiddenTabs = {};
 
+  bool _showTutorial = false;
+  int _tutorialStep = 0;
+
   @override
   void initState() {
     super.initState();
@@ -81,7 +310,34 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
     _fetchArticles();
     _fetchNewArticlesFromSources();
     _archiveOldArticles();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _checkForUpdate();
+      await _checkTutorial();
+    });
+  }
+
+  Future<void> _checkTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getBool('tutorial_seen') ?? false;
+    if (!seen && mounted) {
+      setState(() { _showTutorial = true; _tutorialStep = 0; });
+    }
+  }
+
+  Future<void> _advanceTutorial() async {
+    if (_tutorialStep < 3) {
+      setState(() => _tutorialStep++);
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('tutorial_seen', true);
+      if (mounted) setState(() => _showTutorial = false);
+    }
+  }
+
+  Future<void> _dismissTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tutorial_seen', true);
+    if (mounted) setState(() => _showTutorial = false);
   }
 
   static const int _currentVersionCode = 1;
@@ -334,7 +590,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
           _selectedCategories = List<String>.from(savedOrder).where((c) => c != 'Weekly Top').toList();
           
           if (_selectedCategories.isEmpty) {
-            _selectedCategories = ['Tru Brief', 'Local Brief', 'National Brief', 'World Brief', 'Food Brief'];
+            _selectedCategories = ['Tru Brief', 'Local Brief', 'Weather Brief'];
           }
         });
       }
@@ -488,11 +744,8 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
           final shortCat = _selectedCategory.replaceAll(' Brief', '').replaceAll(' News', '').trim();
           // Filter by multiple name variations to ensure we catch all articles
           query = query.or('category.eq."$_selectedCategory",category.eq."$shortCat",category.eq."$shortCat Brief",category.eq."$shortCat News"');
-          
-          // Only show sources the user has selected
-          if (_selectedSources.isNotEmpty) {
-            query = query.inFilter('source_id', _selectedSources);
-          }
+          // Category tabs show ALL sources for that category — no source filter applied.
+          // _selectedSources filtering only applies to Tru Brief (the personalized aggregate feed).
         }
       }
 
@@ -1003,9 +1256,252 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
     });
   }
 
+  Widget _buildTutorialOverlay() {
+    const steps = [
+      (
+        icon: Icons.swipe_rounded,
+        title: 'Your Feed Tabs',
+        body: 'Swipe through your news categories at the top. Tap the grid icon to see all your feeds.',
+        arrowUp: true,
+      ),
+      (
+        icon: Icons.article_rounded,
+        title: 'Reading an Article',
+        body: 'Tap any article card to read it in the built-in browser. Long-press to save it for later.',
+        arrowUp: false,
+      ),
+      (
+        icon: Icons.layers_rounded,
+        title: 'Multiple Sources',
+        body: 'When a story shows "Reported by X sources", tap it to see how different outlets cover it.',
+        arrowUp: false,
+      ),
+      (
+        icon: Icons.tune_rounded,
+        title: 'Customize Your Briefs',
+        body: 'Tap the settings icon to choose which feeds and sources appear in your personal Tru Brief.',
+        arrowUp: true,
+      ),
+    ];
+
+    final step = steps[_tutorialStep];
+    final isLast = _tutorialStep == steps.length - 1;
+    final totalSteps = steps.length;
+
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.82),
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                top: step.arrowUp ? 80 : null,
+                bottom: step.arrowUp ? null : 120,
+                left: 20,
+                right: 20,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 320),
+                  transitionBuilder: (child, anim) => FadeTransition(
+                    opacity: anim,
+                    child: SlideTransition(
+                      position: Tween<Offset>(begin: const Offset(0.06, 0), end: Offset.zero).animate(anim),
+                      child: child,
+                    ),
+                  ),
+                  child: KeyedSubtree(
+                    key: ValueKey(_tutorialStep),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161618),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.25), width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFF6200).withValues(alpha: 0.12),
+                            blurRadius: 40,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 8),
+                          ),
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            blurRadius: 24,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              height: 3,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [const Color(0xFFFF6200), const Color(0xFFFF6200).withValues(alpha: 0.0)],
+                                  stops: [(_tutorialStep + 1) / totalSteps, (_tutorialStep + 1) / totalSteps],
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(22, 22, 22, 22),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [Color(0xFFFF6200), Color(0xFFFF8C42)],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          ),
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                        child: Icon(step.icon, color: Colors.white, size: 22),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '${_tutorialStep + 1} of $totalSteps',
+                                              style: const TextStyle(
+                                                color: Color(0xFFFF6200),
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                letterSpacing: 0.8,
+                                                decoration: TextDecoration.none,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              step.title,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 18,
+                                                letterSpacing: -0.3,
+                                                decoration: TextDecoration.none,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: _dismissTutorial,
+                                        child: Container(
+                                          width: 28,
+                                          height: 28,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.07),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: const Icon(Icons.close_rounded, color: Colors.white38, size: 16),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    step.body,
+                                    style: const TextStyle(
+                                      color: Color(0xFFAAAAAA),
+                                      fontSize: 14.5,
+                                      height: 1.6,
+                                      decoration: TextDecoration.none,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  Row(
+                                    children: [
+                                      Row(
+                                        children: List.generate(totalSteps, (i) => AnimatedContainer(
+                                          duration: const Duration(milliseconds: 300),
+                                          curve: Curves.easeInOut,
+                                          width: i == _tutorialStep ? 20 : 6,
+                                          height: 6,
+                                          margin: const EdgeInsets.only(right: 5),
+                                          decoration: BoxDecoration(
+                                            color: i == _tutorialStep
+                                                ? const Color(0xFFFF6200)
+                                                : i < _tutorialStep
+                                                    ? const Color(0xFFFF6200).withValues(alpha: 0.4)
+                                                    : Colors.white12,
+                                            borderRadius: BorderRadius.circular(3),
+                                          ),
+                                        )),
+                                      ),
+                                      const Spacer(),
+                                      GestureDetector(
+                                        onTap: _advanceTutorial,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
+                                          decoration: BoxDecoration(
+                                            gradient: const LinearGradient(
+                                              colors: [Color(0xFFFF6200), Color(0xFFFF8040)],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            ),
+                                            borderRadius: BorderRadius.circular(30),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFFFF6200).withValues(alpha: 0.4),
+                                                blurRadius: 12,
+                                                offset: const Offset(0, 4),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                isLast ? 'Get Started' : 'Next',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 14,
+                                                  decoration: TextDecoration.none,
+                                                ),
+                                              ),
+                                              if (!isLast) ...[
+                                                const SizedBox(width: 6),
+                                                const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 15),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
@@ -1088,7 +1584,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
             Builder(builder: (context) {
               final visibleTabs = _selectedCategories.where((c) => !_hiddenTabs.contains(c)).toList();
               final displayTabs = visibleTabs.take(3).toList();
-              final hasMore = visibleTabs.length > 3;
+              const hasMore = true;
 
               Widget _tabChip(String cat) {
                 final isSelected = _selectedCategory == cat;
@@ -1173,11 +1669,11 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
                                             child: Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                               decoration: BoxDecoration(
-                                                color: const Color(0xFF1C1C1E),
+                                                color: const Color(0xFFFF6200).withValues(alpha: 0.12),
                                                 borderRadius: BorderRadius.circular(20),
-                                                border: Border.all(color: Colors.white12),
+                                                border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.4)),
                                               ),
-                                              child: const Text('Close', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600)),
+                                              child: const Text('Close', style: TextStyle(color: Color(0xFFFF6200), fontSize: 12, fontWeight: FontWeight.w600)),
                                             ),
                                           ),
                                         ],
@@ -1243,11 +1739,11 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
                           height: 40,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1C1C1E),
+                            color: const Color(0xFFFF6200).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.white24, width: 1.5),
+                            border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.5),
                           ),
-                          child: const Icon(Icons.grid_view_rounded, size: 18, color: Colors.white54),
+                          child: const Icon(Icons.grid_view_rounded, size: 18, color: Color(0xFFFF6200)),
                         ),
                       ),
                     const SizedBox(width: 16),
@@ -1575,6 +2071,14 @@ class _ArticlesScreenState extends State<ArticlesScreen> {
         ),
       ),
     );
+
+    if (!_showTutorial) return scaffold;
+    return Stack(
+      children: [
+        scaffold,
+        Positioned.fill(child: _buildTutorialOverlay()),
+      ],
+    );
   }
 }
 
@@ -1586,7 +2090,7 @@ class SourceSettingsScreen extends StatefulWidget {
 }
 
 class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
-  String? get _effectiveUserId => Supabase.instance.client.auth.currentUser?.id ?? '00000000-0000-4000-a000-000000000000';
+  String? get _effectiveUserId => Supabase.instance.client.auth.currentUser?.id;
 
   bool _loading = true;
   List<String> _categories = [];
@@ -1665,7 +2169,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
           selectedCategories = List<String>.from(savedOrder).where((c) => c != 'Weekly Top').toList();
           
           if (selectedCategories.isEmpty) {
-            selectedCategories = ['Tru Brief', 'Local Brief', 'National Brief', 'World Brief', 'Food Brief'];
+            selectedCategories = ['Tru Brief', 'Local Brief', 'Weather Brief'];
           }
 
           // Normalize selections: strip any subscription sources that aren't explicitly connected,
@@ -1717,7 +2221,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
           }
         } else {
           // If no prefs exist, highlight the defaults and select top 3 FREE sources per category
-          selectedCategories = ['Tru Brief', 'Local Brief', 'National Brief', 'World Brief', 'Food Brief'];
+          selectedCategories = ['Tru Brief', 'Local Brief', 'Weather Brief'];
           _showLocationEditor = true;
 
           for (var cat in allCategories) {
@@ -1804,6 +2308,15 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
         title: const Text('Settings'),
         backgroundColor: Colors.black,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
+            tooltip: 'Sign out',
+            onPressed: () async {
+              await Supabase.instance.client.auth.signOut();
+            },
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6200)))
@@ -2225,6 +2738,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> {
                                     children: [
                                       Expanded(
                                         child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
                                           onTap: () {
                                             Navigator.push(context, MaterialPageRoute(
                                               builder: (_) => CategoryDetailScreen(
@@ -2687,95 +3201,74 @@ class _NewslettersScreenState extends State<NewslettersScreen> {
           children: [
             Center(child: Container(width: 36, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 20),
-            const Text('Add Newsletter', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-            const SizedBox(height: 6),
-            if (prefillUrl != null) ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.3))),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            Text(
+              prefillName != null ? 'Set up $prefillName' : 'Add Newsletter',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.purpleAccent.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _step('1', 'Open Kill the Newsletter, type a name, tap Create — you\'ll get an Email Address and Atom Feed URL'),
+                  const SizedBox(height: 6),
+                  _step('2', 'Use that Email Address to subscribe to the newsletter'),
+                  const SizedBox(height: 6),
+                  _step('3', 'Paste the Atom Feed URL into the field below and tap Add'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () async => launchUrl(Uri.parse('https://kill-the-newsletter.com'), mode: LaunchMode.externalApplication),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                decoration: BoxDecoration(
+                  color: Colors.purpleAccent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.4)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('One-time setup — follow these steps:', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 10),
-                    _step('1', 'Tap "Step 1 — Open Kill the Newsletter" below. It will open in your browser — keep that tab open, you\'ll need to return to it in Step 3.\n\nOn the Kill the Newsletter page, enter "${prefillName ?? 'Newsletter'}" as the name and tap Create.'),
-                    const SizedBox(height: 4),
-                    Container(
-                      margin: const EdgeInsets.only(left: 28, bottom: 10),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white10)),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('You\'ll receive 2 addresses:', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          const Text('📧  EMAIL ADDRESS (1st) — used to subscribe to the newsletter', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                          const Text('📡  ATOM FEED URL (2nd) — used to connect it to TruBrief', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                    _step('2', 'Copy the EMAIL ADDRESS (1st field) and come back to TruBrief.'),
-                    const SizedBox(height: 4),
-                    _step('3', 'Tap "Step 2 — Go to ${prefillName ?? 'Newsletter'}" below and subscribe using that EMAIL ADDRESS on their signup page.'),
-                    const SizedBox(height: 4),
-                    _step('4', 'Come back to this screen.\nCopy the ATOM FEED URL (2nd field on Kill the Newsletter) and paste it into the field below.'),
+                    Icon(Icons.open_in_new, color: Colors.purpleAccent, size: 15),
+                    SizedBox(width: 8),
+                    Text('Open Kill the Newsletter', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.w700, fontSize: 13)),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () async {
-                  await launchUrl(Uri.parse('https://kill-the-newsletter.com'), mode: LaunchMode.externalApplication);
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.5))),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.open_in_new, color: Colors.purpleAccent, size: 16),
-                      SizedBox(width: 8),
-                      Text('Step 1 — Open Kill the Newsletter', style: TextStyle(color: Colors.purpleAccent, fontWeight: FontWeight.w700, fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ),
+            ),
+            if (prefillUrl != null) ...[
               const SizedBox(height: 8),
               GestureDetector(
-                onTap: () async {
-                  await launchUrl(Uri.parse(prefillUrl!), mode: LaunchMode.externalApplication);
-                },
+                onTap: () async => launchUrl(Uri.parse(prefillUrl), mode: LaunchMode.externalApplication),
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white24)),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white24),
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.open_in_new, color: Colors.white54, size: 16),
+                      const Icon(Icons.open_in_new, color: Colors.white54, size: 15),
                       const SizedBox(width: 8),
-                      Text('Step 2 — Go to ${prefillName ?? 'Newsletter'} to Subscribe', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 13)),
+                      Text('Go to ${prefillName ?? 'Newsletter'} to Subscribe', style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600, fontSize: 13)),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-            ] else ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white10)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _step('1', 'Go to kill-the-newsletter.com → type a name → tap Create'),
-                    _step('2', 'Copy the EMAIL ADDRESS (first field) and subscribe to your newsletter using it'),
-                    _step('3', 'Copy the ATOM FEED URL (second field) and paste it below'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
             ],
+            const SizedBox(height: 16),
             TextField(
               controller: nameCtrl,
               style: const TextStyle(color: Colors.white),
@@ -2791,7 +3284,7 @@ class _NewslettersScreenState extends State<NewslettersScreen> {
               controller: rssCtrl,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                labelText: 'RSS Feed URL (from Kill the Newsletter)',
+                labelText: 'Atom Feed URL (from Kill the Newsletter)',
                 labelStyle: const TextStyle(color: Colors.white38),
                 filled: true, fillColor: Colors.white.withValues(alpha: 0.06),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
@@ -2886,16 +3379,15 @@ class _NewslettersScreenState extends State<NewslettersScreen> {
                       ]),
                       const SizedBox(height: 10),
                       const Text(
-                        'TruBrief uses a free service called Kill the Newsletter to convert email newsletters into feed articles. You\'ll be redirected there once per newsletter to complete setup — after that, everything arrives automatically in your Tru Brief tab.',
+                        'Turn any email newsletter into feed articles — no email inbox needed. One-time setup per newsletter.',
                         style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
                       ),
                       const SizedBox(height: 12),
-                      _step('1', 'Tap a newsletter below — you\'ll be sent to Kill the Newsletter'),
-                      _step('2', 'Type the newsletter name and tap Create'),
-                      _step('3', 'It will give you two addresses needed for setup:\n📧 EMAIL ADDRESS — the address you\'ll register with the newsletter\n📡 ATOM FEED URL — the address you\'ll paste into TruBrief'),
-                      _step('4', 'Go to the newsletter\'s website and subscribe using the EMAIL ADDRESS'),
-                      _step('5', 'Come back here, paste the ATOM FEED URL, and tap Add'),
-                      _step('6', 'Step-by-step instructions are provided for each newsletter listed below. Any newsletter not listed will follow this same process.'),
+                      _step('1', 'Tap a newsletter below → Open Kill the Newsletter → type a name → tap Create'),
+                      const SizedBox(height: 4),
+                      _step('2', 'Use the Email Address they give you to subscribe to that newsletter'),
+                      const SizedBox(height: 4),
+                      _step('3', 'Paste the Atom Feed URL into TruBrief — done! Articles appear in your Tru Brief tab'),
                     ],
                   ),
                 ),

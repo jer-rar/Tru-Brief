@@ -1,5 +1,5 @@
 # TRUBRIEF MEMORY FILE
-> Read this file at the start of every session. User will say "open tru brief" to load context.
+> Read this file at the start of every session. User will say "review your memory on tru brief" to load context.
 
 ---
 
@@ -7,7 +7,7 @@
 - **App name:** TruBrief
 - **Company:** Tru-Resolve LLC
 - **Project path:** `D:\Tru-Developer\trubrief_app`
-- **Main file:** `lib/main.dart` (single-file Flutter app, ~3650 lines)
+- **Main file:** `lib/main.dart` (single-file Flutter app, ~4150 lines)
 - **Backend:** Supabase (PostgreSQL)
 - **Platform:** Android (primary), iOS planned
 - **Git repo:** `D:\Tru-Developer\trubrief_app\.git`
@@ -23,6 +23,29 @@
 - `geolocator` + `geocoding` (GPS location for Local Brief)
 - `url_launcher` (open external URLs, update download links)
 - RSS feeds fetched directly via `http` package
+
+---
+
+## DEV ENVIRONMENT
+- **Flutter:** `D:\Tru-Developer\flutter\bin\flutter`
+- **Android SDK:** `D:\Tru-Developer\AndroidSDK`
+- **AVD:** `Medium_Phone_API_36.1` — stored at `D:\Tru-Developer\.android\avd\`
+- **AVD config fixes applied:** `hw.ramSize=4096`, `fastboot.forceColdBoot=yes`, `hw.gpu.mode=auto`
+- **Emulator launch:** Use Android Studio Device Manager (NOT command line — path env issues)
+- **Cold boot takes 3–5 min** on first launch — "Not Responding" title is normal during init
+- **Run command:** `flutter run -d emulator-5556` (from `D:\Tru-Developer\trubrief_app`)
+- **⚠️ Both emulators have NO internet** — Supabase calls will hang/fail from emulator. Account creation must be done via Supabase dashboard.
+
+## DEV ACCOUNT
+- **Email:** `jdr6382@gmail.com`
+- **Password:** `Jerd6382!`
+- **Auto-filled in debug mode** via `kDebugMode` in `_LoginScreenState` — just tap Sign In
+- **Premium SQL** (run in Supabase SQL editor if needed):
+```sql
+INSERT INTO trl_subscriptions (user_id, status, trial_started_at)
+SELECT id, 'active', NOW() FROM auth.users WHERE email = 'jdr6382@gmail.com'
+ON CONFLICT (user_id) DO UPDATE SET status = 'active';
+```
 
 ---
 
@@ -86,12 +109,38 @@ VALUES ('1.0.0', 1, '', 'Initial alpha');
 - Private repo: `https://github.com/jer-rar/Tru-Brief`
 - Upload APK as a release asset → copy direct download URL → put in `trl_app_version.download_url`
 
+### Auth & Session
+- Supabase email/password auth — sessions auto-persist via SharedPreferences
+- Alpha testers log in ONCE — session saved, auto-restored on subsequent launches
+- No "Remember Me" needed — it's the default Supabase Flutter behavior
+- RLS (Row Level Security) should be enabled before production release
+
 ### ⚠️ NEXT SESSION — Play Store Setup
-When user says "open tru brief" next session, start with:
+When ready for Play Store:
 1. Generate a release keystore: `keytool -genkey -v -keystore trubrief-release.jks -keyalias trubrief -keyalg RSA -keysize 2048 -validity 10000`
 2. Configure `android/app/build.gradle.kts` with signing config
 3. Build AAB: `flutter build appbundle --release`
 4. Upload to Google Play Console (Internal Testing track first)
+
+---
+
+## SESSION LOG
+
+### Session 2026-03-18 (first session with auth + emulator setup)
+- **Auth system**: Added `_AuthGate`, `LoginScreen` (email/password + signup), persistent Supabase session. Sign out in Settings AppBar.
+- **Category feeds fix**: `_selectedSources` filter removed from category tabs. Category tabs show ALL articles; `_selectedSources` only applies to Tru Brief.
+- **Tutorial overlay**: 4-step first-time tutorial (`tutorial_seen` in SharedPreferences). Steps: Feed Tabs, Reading Articles, Multiple Sources, Customize.
+
+### Session 2026-03-18 (second session — UI polish + emulator fixes)
+- **Emulator fix**: API 36.1 AVD was stuck booting. Fixed by setting `hw.ramSize=4096`, `fastboot.forceColdBoot=yes`, `hw.gpu.mode=auto`. Cold boot takes 3–5 min.
+- **New working emulator**: Created second AVD (API 36.0 Pixel 9) running on `emulator-5556`. **Both emulators have no internet** — Supabase calls hang. Use Supabase dashboard to create accounts.
+- **Dev account auto-fill**: `kDebugMode` pre-fills `jdr6382@gmail.com` / `Jerd6382!` in LoginScreen. Just tap Sign In.
+- **Tutorial redesign**: Full visual overhaul — `Material` wrapper fixes text underlines, orange gradient progress bar at top, gradient icon badge, `AnimatedSwitcher` fade+slide between steps, animated dots (completed = faded orange), gradient Next button with glow + arrow icon.
+- **Default tabs changed**: New user default tabs → `['Tru Brief', 'Local Brief', 'Weather Brief']` (was National/World/Food). Updated in 3 locations in code.
+- **Grid icon always visible + orange**: Changed `hasMore` from `visibleTabs.length > 3` to `const hasMore = true`. Grid icon styled orange with orange border/tint.
+- **Available Feeds tap fix**: Added `behavior: HitTestBehavior.opaque` to `GestureDetector` in Available Feeds grid — cards were only tappable on text pixels, not full card area.
+- **Close button orange**: "My Feeds" overlay Close button updated to orange theme.
+- **county column**: Run this SQL if not done yet: `ALTER TABLE trl_user_preferences ADD COLUMN IF NOT EXISTS county TEXT;`
 
 ---
 
@@ -121,58 +170,10 @@ When user says "open tru brief" next session, start with:
 | Politics Brief | ~13 | |
 | Gaming Brief | ~14 | |
 | Crypto Brief | 15 | |
-| Astrology Brief | 160 | Added this session |
-| Exploration Brief | 170 | Added this session |
-| Wildlife Brief | 180 | Added this session |
+| Astrology Brief | 160 | |
+| Exploration Brief | 170 | |
+| Wildlife Brief | 180 | |
 | Weekly Top | 10 | Virtual |
-
-### SQL to add Astrology, Exploration, Wildlife (use correct columns: no is_active/is_featured)
-```sql
--- Astrology Brief
-INSERT INTO trl_categories (name, display_order, is_virtual)
-VALUES ('Astrology Brief', 160, false) ON CONFLICT DO NOTHING;
-
-INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
-('Astrology Zone', 'Astrology Brief', 'https://www.astrologyzone.com/feed/', 'rss', false, true),
-('Cafe Astrology', 'Astrology Brief', 'https://cafeastrology.com/feed/', 'rss', false, true),
-('AstroStyle', 'Astrology Brief', 'https://astrostyle.com/feed/', 'rss', false, true),
-('Chani Nicholas', 'Astrology Brief', 'https://chaninicholas.com/feed/', 'rss', false, false),
-('ElsaElsa', 'Astrology Brief', 'https://elsaelsa.com/feed/', 'rss', false, false),
-('The Astro Codex', 'Astrology Brief', 'https://theastrocodex.com/feed/', 'rss', false, false)
-ON CONFLICT (url) DO NOTHING;
-
--- Exploration Brief
-INSERT INTO trl_categories (name, display_order, is_virtual)
-VALUES ('Exploration Brief', 170, false) ON CONFLICT DO NOTHING;
-
-INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
-('Atlas Obscura', 'Exploration Brief', 'https://www.atlasobscura.com/feeds/latest', 'rss', false, true),
-('Adventure Journal', 'Exploration Brief', 'https://www.adventure-journal.com/feed/', 'rss', false, true),
-('Outside Online', 'Exploration Brief', 'https://www.outsideonline.com/feed/', 'rss', false, true),
-('Expedition Portal', 'Exploration Brief', 'https://expeditionportal.com/feed/', 'rss', false, false),
-('Explorers Web', 'Exploration Brief', 'https://www.explorersweb.com/feed/', 'rss', false, false),
-('Condé Nast Traveler', 'Exploration Brief', 'https://www.cntraveler.com/feed/rss', 'rss', false, false),
-('Lonely Planet', 'Exploration Brief', 'https://www.lonelyplanet.com/news/feed/', 'rss', false, false),
-('National Geographic Travel', 'Exploration Brief', 'https://www.nationalgeographic.com/travel/feed/', 'rss', true, false)
-ON CONFLICT (url) DO NOTHING;
-
--- Wildlife Brief
-INSERT INTO trl_categories (name, display_order, is_virtual)
-VALUES ('Wildlife Brief', 180, false) ON CONFLICT DO NOTHING;
-
-INSERT INTO trl_sources (name, category, url, type, requires_subscription, is_preset) VALUES
-('National Geographic Animals', 'Wildlife Brief', 'https://www.nationalgeographic.com/animals/feed/', 'rss', false, true),
-('Mongabay', 'Wildlife Brief', 'https://mongabay.com/feed/', 'rss', false, true),
-('Discover Wildlife', 'Wildlife Brief', 'https://www.discoverwildlife.com/feed/', 'rss', false, true),
-('Wildlife Conservation Society', 'Wildlife Brief', 'https://newsroom.wcs.org/News-Releases.aspx?feed=rss', 'rss', false, false),
-('WWF News', 'Wildlife Brief', 'https://www.worldwildlife.org/blog.rss', 'rss', false, false),
-('Defenders of Wildlife', 'Wildlife Brief', 'https://defenders.org/feed/', 'rss', false, false),
-('African Wildlife Foundation', 'Wildlife Brief', 'https://www.awf.org/blog/feed', 'rss', false, false),
-('The Wildlife Society', 'Wildlife Brief', 'https://wildlife.org/feed/', 'rss', false, false),
-('iNaturalist Blog', 'Wildlife Brief', 'https://www.inaturalist.org/blog.atom', 'rss', false, false),
-('Nature.com Wildlife', 'Wildlife Brief', 'https://www.nature.com/subjects/animal-behaviour.rss', 'rss', false, false)
-ON CONFLICT (url) DO NOTHING;
-```
 
 ---
 
@@ -200,21 +201,24 @@ ON CONFLICT (url) DO NOTHING;
   - Eye icon (right sliver): quick-toggle tab visibility without opening the detail screen
   - Unselected feed: tapping eye instantly quick-adds with top 3 free sources
   - Selected feed: tapping eye toggles tab visibility
+  - `HitTestBehavior.opaque` on card GestureDetector — full card area tappable
 - **CategoryDetailScreen** per category:
   - Toggle 1: "Show in feed" — independent
   - Toggle 2: "Display Tab" — independent (does NOT auto-off when Show in feed is turned off)
 
 ### Main Tab Bar
 - Shows first 3 visible tabs only
-- **Grid icon (⊞)** to the right of 3rd tab → opens `DraggableScrollableSheet` overlay
-- Overlay shows "My Feeds" grid of remaining tabs (4+), all orange-tinted
-- **Close button** (top right) or tap outside dismisses overlay (`isDismissible: true`)
+- **Grid icon (⊞)** always visible, orange-themed → opens `DraggableScrollableSheet` overlay
+- Overlay shows "My Feeds" grid of all tabs, Close button orange-themed
 - Tapping a feed in overlay navigates to it and closes overlay
+- Default visible tabs for new users: `Tru Brief`, `Local Brief`, `Weather Brief`
 
-### Display Tab Feature
-- `hidden_tabs TEXT[]` in `trl_user_preferences`
-- Two independent toggles per category in CategoryDetailScreen
-- Available Feeds grid eye icon reflects hidden state
+### Tutorial Overlay
+- 4-step first-launch tutorial (SharedPreferences key: `tutorial_seen`)
+- Orange gradient progress bar, gradient icon badge, AnimatedSwitcher transitions
+- Dots animate: active=orange, past=faded orange, future=white12
+- Next button: gradient + glow shadow + arrow icon; last step shows "Get Started"
+- X dismiss button closes and marks seen
 
 ### OTA Update Checker
 - `_checkForUpdate()` called in `initState` via `addPostFrameCallback`
@@ -242,9 +246,6 @@ ON CONFLICT (url) DO NOTHING;
 - [ ] Fill store listing: icon (512x512), feature graphic (1024x500), screenshots, privacy policy
 
 ### Phase 1 — Category Expansion
-- [ ] **Astrology Brief** SQL (above) — run when ready
-- [ ] **Exploration Brief** SQL (above) — run when ready
-- [ ] **Wildlife Brief** SQL (above) — run when ready
 - [ ] **Pet Brief subcategories**: Dogs, Cats, Reptiles, Aquarium, Small Animals
 - [ ] **Gaming Brief subcategories**: Video Games, Tabletop (distinguish from gambling)
 
@@ -254,9 +255,11 @@ ON CONFLICT (url) DO NOTHING;
 - [ ] Support multi-format postal codes (Canada, UK)
 
 ### Phase 3 — Quality / QA
+- [ ] Fix emulator internet (Windows Firewall — allow `qemu-system-x86_64.exe` private+public)
 - [ ] Blank tabs root cause fix
 - [ ] Verify all RSS source URLs are live
 - [ ] Cross-reference DB sources vs. expected list
+- [ ] Enable RLS on Supabase tables before production
 
 ### Phase 4 — AI / Monetization
 - [ ] AI summary feature (OpenAI integration, paid users only)
@@ -266,24 +269,27 @@ ON CONFLICT (url) DO NOTHING;
 ---
 
 ## KNOWN ISSUES
+- [ ] **Emulator has no internet** — Supabase calls hang. Fix: Windows Firewall → allow `qemu-system-x86_64.exe`
 - [ ] Local Brief images: Google News returns Google logo — needs og:image scraping
 - [ ] Weather Brief and Politics Brief RSS URLs need live verification
 - [ ] International news: country-aware API not yet implemented
 - [ ] `trubrief-release.jks` keystore not yet created (needed for Play Store)
+- [ ] RLS not yet enabled on Supabase tables
 
 ---
 
 ## IMPORTANT CODE LOCATIONS (lib/main.dart)
-- `_currentVersionCode` — static const int, increment each release (~line 87)
-- `_checkForUpdate()` — OTA update checker (~line 89)
-- `_fetchGoogleNewsLocal()` — multi-query parallel Local Brief fetch (~line 365)
-- `_fetchGoogleNewsQuery()` — single RSS query helper (~line 417)
-- `_deduplicateByTopic()` — Jaccard dedup/grouping (~line 495)
-- `_showSourcesBottomSheet()` — multi-source modal with AI upsell (~line 800)
-- `SourceSettingsScreen` class — full settings UI (~line 1480)
-- `CategoryDetailScreen` class — per-category source management + two independent toggles (~line 3030)
-- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 3380)
-- `_hiddenTabs` — Set of categories hidden from tab bar
+- `_currentVersionCode` — static const int, increment each release (~line 88)
+- `_checkForUpdate()` — OTA update checker (~line 90)
+- `_LoginScreenState` — `kDebugMode` pre-fill for dev credentials (~line 79)
+- `_fetchGoogleNewsLocal()` — multi-query parallel Local Brief fetch (~line 625)
+- `_fetchGoogleNewsQuery()` — single RSS query helper (~line 675)
+- `_deduplicateByTopic()` — Jaccard dedup/grouping (~line 804)
+- `_buildTutorialOverlay()` — redesigned tutorial (~line 1258)
+- `_tabChip()` + grid icon — main tab bar builder (~line 1583)
+- `SourceSettingsScreen` class — full settings UI (~line 2084)
+- `CategoryDetailScreen` class — per-category source management (~line 3521)
+- `ArticleReaderScreen` class — in-app browser + paywall detection (~line 3764)
 
 ---
 
@@ -297,6 +303,7 @@ ON CONFLICT (url) DO NOTHING;
 | 9d35669 | Postal code rename, display tab, hidden tabs, TRUBRIEF.md overhaul |
 | 1764bbf | Fix overlay dismiss (removed GestureDetector wrapper) |
 | 61cf59c | applicationId → com.truresolve.trubrief, OTA update checker, alpha APK built |
+| pending | Auth, tutorial, emulator fixes, UI polish, default tabs, grid icon, card tap fix |
 
 ---
 
