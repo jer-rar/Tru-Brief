@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'trubrief_logo.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -14,10 +14,12 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:app_links/app_links.dart';
 import 'dart:io';
+import 'dart:ui' as ui;
 
-const String _kAppVersion = '1.0.9';
-const int _kAppVersionCode = 9;
+const String _kAppVersion = '1.1.1';
+const int _kAppVersionCode = 11;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +28,10 @@ void main() async {
     url: 'https://kusvloreaakrvwsdhqhj.supabase.co',
     anonKey: 'sb_publishable_eHuAUb_bxcu8mi5ZL8u9XA_k4iQjeCW',
   );
+
+  AppLinks().uriLinkStream.listen((uri) {
+    Supabase.instance.client.auth.getSessionFromUrl(uri);
+  });
 
   runApp(const TruBriefApp());
 }
@@ -39,9 +45,17 @@ class TruBriefApp extends StatelessWidget {
       title: 'TruBrief',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
+        useMaterial3: false,
         scaffoldBackgroundColor: Colors.black,
         cardColor: const Color(0xFF1C1C1E),
-        appBarTheme: const AppBarTheme(backgroundColor: Colors.black, elevation: 0),
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.black,
+            statusBarIconBrightness: Brightness.light,
+          ),
+        ),
       ),
       home: const _AuthGate(),
     );
@@ -129,6 +143,39 @@ class _LoginScreenState extends State<LoginScreen> {
     await prefs.remove('remember_me');
     await prefs.remove('saved_email');
     await prefs.remove('saved_password');
+  }
+
+  Future<void> _signInWithSocial(OAuthProvider provider) async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        provider,
+        redirectTo: 'com.truresolve.trubrief://login-callback',
+      );
+    } on AuthException catch (e) {
+      if (mounted) setState(() { _error = e.message; _loading = false; });
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Social sign-in failed. Please try again.'; _loading = false; });
+    }
+  }
+
+  Widget _socialButton(String letter, String name, VoidCallback onTap, Color color, {IconData? icon}) {
+    return GestureDetector(
+      onTap: _loading ? null : onTap,
+      child: Container(
+        width: 56, height: 56,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Center(
+          child: icon != null
+            ? Icon(icon, color: color, size: 26)
+            : Text(letter, style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: letter == '𝕏' ? 18 : 22)),
+        ),
+      ),
+    );
   }
 
   @override
@@ -382,6 +429,28 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+                Row(children: [
+                  const Expanded(child: Divider(color: Colors.white12)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('or continue with', style: const TextStyle(color: Colors.white24, fontSize: 12)),
+                  ),
+                  const Expanded(child: Divider(color: Colors.white12)),
+                ]),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _socialButton('G', 'Google', () => _signInWithSocial(OAuthProvider.google), const Color(0xFF4285F4)),
+                    const SizedBox(width: 12),
+                    _socialButton('', 'Apple', () => _signInWithSocial(OAuthProvider.apple), Colors.white, icon: Icons.apple),
+                    const SizedBox(width: 12),
+                    _socialButton('f', 'Facebook', () => _signInWithSocial(OAuthProvider.facebook), const Color(0xFF1877F2)),
+                    const SizedBox(width: 12),
+                    _socialButton('𝕏', 'X / Twitter', () => _signInWithSocial(OAuthProvider.twitter), Colors.white),
+                  ],
+                ),
+                const SizedBox(height: 20),
                 Center(
                   child: GestureDetector(
                     onTap: () => setState(() { _isLogin = !_isLogin; _error = null; }),
@@ -425,7 +494,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
   String? get _effectiveUserId => Supabase.instance.client.auth.currentUser?.id;
 
   bool get _currentCategoryHasNoActiveSources {
-    if (_selectedCategory == 'Tru Brief' || _selectedCategory == 'Local Brief' || _selectedCategory == 'National Brief') return false;
+    if (_selectedCategory == 'Tru Brief' || _selectedCategory == 'Local Brief' || _selectedCategory == 'National Brief' || _selectedCategory == 'Tru Flash') return false;
     final shortCat = _selectedCategory.replaceAll(' Brief', '').replaceAll(' News', '').trim();
     final catSources = _allSources.where((s) {
       final sCat = s['category']?.toString() ?? '';
@@ -457,6 +526,85 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
   String? _state;
   String? _county;
   Set<String> _hiddenTabs = {};
+  String _flashSelectedSource = 'All Sources';
+  String? _flashSelectedTopic;
+  List<String> _flashEnabledSources = [];
+  List<Map<String, dynamic>> _flashDynamicTopics = [];
+  List<dynamic> _flashAllSourceArticles = [];
+
+  static const List<Map<String, String>> _kFlashSources = [
+    {'name': 'Fox News', 'url': 'https://feeds.foxnews.com/foxnews/latest'},
+    {'name': 'CNN', 'url': 'https://news.google.com/rss/search?q=site:cnn.com&hl=en-US&gl=US&ceid=US:en'},
+    {'name': 'NBC News', 'url': 'https://feeds.nbcnews.com/nbcnews/public/news'},
+    {'name': 'Politico', 'url': 'https://rss.politico.com/politics-news.xml'},
+    {'name': 'ABC News', 'url': 'https://feeds.abcnews.com/abcnews/topstories'},
+    {'name': 'CBS News', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/latest'},
+    {'name': 'NPR', 'url': 'https://feeds.npr.org/1001/rss.xml'},
+    {'name': 'Reuters', 'url': 'https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en'},
+    {'name': 'The Hill', 'url': 'https://thehill.com/rss/syndicator/19110'},
+    {'name': 'DW News', 'url': 'https://rss.dw.com/rdf/rss-en-top'},
+  ];
+
+  static const Map<String, List<Map<String, String>>> _kFlashSourceTopics = {
+    'Fox News': [
+      {'name': 'Latest', 'url': 'https://feeds.foxnews.com/foxnews/latest'},
+      {'name': 'Politics', 'url': 'https://feeds.foxnews.com/foxnews/politics'},
+      {'name': 'U.S.', 'url': 'https://feeds.foxnews.com/foxnews/national'},
+      {'name': 'World', 'url': 'https://feeds.foxnews.com/foxnews/world'},
+      {'name': 'Business', 'url': 'https://feeds.foxnews.com/foxnews/business'},
+      {'name': 'Entertainment', 'url': 'https://feeds.foxnews.com/foxnews/entertainment'},
+    ],
+    'CNN': [
+      {'name': 'Latest', 'url': 'https://news.google.com/rss/search?q=site:cnn.com&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'Politics', 'url': 'https://news.google.com/rss/search?q=site:cnn.com+politics&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'World', 'url': 'https://news.google.com/rss/search?q=site:cnn.com+world+news&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'U.S.', 'url': 'https://news.google.com/rss/search?q=site:cnn.com+us+news&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'Business', 'url': 'https://news.google.com/rss/search?q=site:cnn.com+business&hl=en-US&gl=US&ceid=US:en'},
+    ],
+    'NBC News': [
+      {'name': 'Latest', 'url': 'https://feeds.nbcnews.com/nbcnews/public/news'},
+      {'name': 'Politics', 'url': 'https://feeds.nbcnews.com/nbcnews/public/politics'},
+      {'name': 'Business', 'url': 'https://feeds.nbcnews.com/nbcnews/public/business'},
+    ],
+    'Politico': [
+      {'name': 'Politics', 'url': 'https://rss.politico.com/politics-news.xml'},
+      {'name': 'Congress', 'url': 'https://rss.politico.com/congress.xml'},
+    ],
+    'ABC News': [
+      {'name': 'Latest', 'url': 'https://feeds.abcnews.com/abcnews/topstories'},
+      {'name': 'U.S.', 'url': 'https://feeds.abcnews.com/abcnews/us'},
+      {'name': 'World', 'url': 'https://feeds.abcnews.com/abcnews/world'},
+      {'name': 'Politics', 'url': 'https://feeds.abcnews.com/abcnews/politics'},
+      {'name': 'Business', 'url': 'https://feeds.abcnews.com/abcnews/business'},
+    ],
+    'CBS News': [
+      {'name': 'Latest', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/latest'},
+      {'name': 'U.S.', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/us'},
+      {'name': 'World', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/world'},
+      {'name': 'Politics', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/politics'},
+    ],
+    'NPR': [
+      {'name': 'News', 'url': 'https://feeds.npr.org/1001/rss.xml'},
+      {'name': 'Politics', 'url': 'https://feeds.npr.org/1014/rss.xml'},
+      {'name': 'World', 'url': 'https://feeds.npr.org/1004/rss.xml'},
+      {'name': 'Business', 'url': 'https://feeds.npr.org/1006/rss.xml'},
+    ],
+    'Reuters': [
+      {'name': 'Top News', 'url': 'https://news.google.com/rss/search?q=site:reuters.com&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'Business', 'url': 'https://news.google.com/rss/search?q=site:reuters.com+business&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'World', 'url': 'https://news.google.com/rss/search?q=site:reuters.com+world+news&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'Politics', 'url': 'https://news.google.com/rss/search?q=site:reuters.com+politics&hl=en-US&gl=US&ceid=US:en'},
+      {'name': 'Tech', 'url': 'https://news.google.com/rss/search?q=site:reuters.com+technology&hl=en-US&gl=US&ceid=US:en'},
+    ],
+    'The Hill': [
+      {'name': 'Latest', 'url': 'https://thehill.com/rss/syndicator/19110'},
+    ],
+    'DW News': [
+      {'name': 'Top', 'url': 'https://rss.dw.com/rdf/rss-en-top'},
+      {'name': 'World', 'url': 'https://rss.dw.com/rdf/rss-en-world'},
+      {'name': 'Business', 'url': 'https://rss.dw.com/rdf/rss-en-business'},
+    ],
+  };
 
   bool _showTutorial = false;
   int _tutorialStep = 0;
@@ -477,13 +625,530 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
     _fetchUserData();
     _fetchSavedArticles();
     _ensureDefaultSourcesExist();
-    _fetchArticles();
     _fetchNewArticlesFromSources();
     _archiveOldArticles();
+    _loadFlashEnabledSources();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _checkForUpdate();
       await _checkTutorial();
     });
+  }
+
+  Future<void> _loadFlashEnabledSources() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('flash_enabled_sources');
+    if (mounted) {
+      setState(() {
+        _flashEnabledSources = saved ?? _kFlashSources.map((s) => s['name']!).toList();
+        if (_flashEnabledSources.isNotEmpty && (_flashSelectedSource == 'All Sources' || !_flashEnabledSources.contains(_flashSelectedSource))) {
+          _flashSelectedSource = _flashEnabledSources.first;
+        }
+        _flashSelectedTopic = null;
+      });
+    }
+  }
+
+  static const Set<String> _kFlashStopWords = {
+    'about', 'after', 'again', 'against', 'also', 'amid', 'another', 'are', 'back',
+    'been', 'being', 'between', 'both', 'but', 'call', 'calls', 'can', 'come',
+    'comes', 'could', 'days', 'dead', 'dies', 'does', 'dont', 'down', 'each',
+    'even', 'ever', 'face', 'faces', 'find', 'first', 'from', 'full', 'gets',
+    'getting', 'give', 'going', 'good', 'have', 'here', 'high', 'hits', 'home',
+    'hours', 'into', 'just', 'know', 'last', 'late', 'like', 'live', 'made', 'make',
+    'many', 'more', 'most', 'move', 'much', 'need', 'never', 'news', 'next', 'now',
+    'only', 'open', 'other', 'over', 'part', 'plan', 'plans', 'plus', 'puts',
+    'real', 'report', 'reports', 'right', 'said', 'same', 'says', 'seen', 'sets',
+    'show', 'shows', 'since', 'some', 'still', 'such', 'take', 'takes', 'talk',
+    'tells', 'than', 'that', 'the', 'their', 'them', 'then', 'there', 'these',
+    'they', 'this', 'three', 'through', 'time', 'today', 'told', 'too', 'top',
+    'turn', 'two', 'under', 'until', 'use', 'used', 'very', 'want', 'wants',
+    'was', 'way', 'week', 'weeks', 'were', 'what', 'when', 'where', 'which',
+    'while', 'who', 'will', 'with', 'without', 'would', 'year', 'years', 'your',
+    'major',
+  };
+
+  List<Map<String, dynamic>> _extractFlashTopics(List<dynamic> articles) {
+    final phraseToIndices = <String, Set<int>>{};
+
+    for (int i = 0; i < articles.length; i++) {
+      final rawTitle = (articles[i]['title'] ?? '').toString();
+      final words = rawTitle
+          .replaceAll(RegExp(r"[^\w\s'-]"), ' ')
+          .split(RegExp(r'\s+'))
+          .where((w) => w.length >= 2)
+          .toList();
+
+      for (int len = 2; len <= 4; len++) {
+        for (int j = 0; j <= words.length - len; j++) {
+          final seg = words.sublist(j, j + len);
+          final segLower = seg.map((w) => w.toLowerCase()).toList();
+          // First and last word must not be stop words
+          if (_kFlashStopWords.contains(segLower.first) || _kFlashStopWords.contains(segLower.last)) continue;
+          // First and last word must be substantial
+          if (seg.first.length < 3 || seg.last.length < 3) continue;
+          // At least ceil(len/2) words must be non-stop
+          final nonStop = segLower.where((w) => !_kFlashStopWords.contains(w)).length;
+          if (nonStop < (len / 2).ceil()) continue;
+          final phrase = seg.map((w) => w.toUpperCase()).join(' ');
+          phraseToIndices.putIfAbsent(phrase, () => <int>{}).add(i);
+        }
+      }
+    }
+
+    // Sort: more articles first, then longer phrase preferred
+    final candidates = phraseToIndices.entries
+        .where((e) => e.value.length >= 2)
+        .toList()
+      ..sort((a, b) {
+        final cmp = b.value.length.compareTo(a.value.length);
+        if (cmp != 0) return cmp;
+        return b.key.length.compareTo(a.key.length);
+      });
+
+    final selected = <String>[];
+    final usedIndices = <int>{};
+    final topics = <Map<String, dynamic>>[];
+
+    for (final entry in candidates) {
+      if (topics.length >= 5) break;
+      final phrase = entry.key;
+      // Skip sub-phrases or super-phrases of already selected topics
+      if (selected.any((s) => s.contains(phrase) || phrase.contains(s))) continue;
+      final newIndices = entry.value.difference(usedIndices);
+      if (newIndices.length < 2) continue;
+      final topicArticles = entry.value.map((idx) => articles[idx]).toList()
+        ..sort((a, b) {
+          final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+          final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+          return db.compareTo(da);
+        });
+      selected.add(phrase);
+      usedIndices.addAll(entry.value);
+      topics.add({'name': phrase, 'articles': topicArticles});
+    }
+    return topics;
+  }
+
+  Future<void> _fetchFlashBySourceAndTopic(String sourceName, String topicUrl) async {
+    if (mounted) setState(() => _loading = true);
+    try {
+      // Fetch from ALL available RSS feeds for this source to maximise the article pool for topic matching
+      final feedUrls = (_kFlashSourceTopics[sourceName]?.map((t) => t['url']!).toList())
+          ?? [_kFlashSources.firstWhere((s) => s['name'] == sourceName, orElse: () => {'url': topicUrl})['url'] ?? topicUrl];
+      final results = await Future.wait(feedUrls.map((u) => _fetchRssFeedExpanded(u)));
+      final seen = <String>{};
+      final allArticles = <dynamic>[];
+      for (final batch in results) {
+        for (final a in batch) {
+          final url = (a['original_url'] ?? '').toString();
+          if (url.isNotEmpty && seen.add(url)) allArticles.add(a);
+        }
+      }
+      if (allArticles.isEmpty) {
+        final sourceDomains = <String, String>{
+          'CNN': 'cnn.com',
+          'Reuters': 'reuters.com',
+          'NBC News': 'nbcnews.com',
+          'ABC News': 'abcnews.go.com',
+          'CBS News': 'cbsnews.com',
+          'Politico': 'politico.com',
+          'NPR': 'npr.org',
+          'The Hill': 'thehill.com',
+          'DW News': 'dw.com',
+          'Fox News': 'foxnews.com',
+        };
+        final domain = sourceDomains[sourceName];
+        if (domain != null) {
+          try {
+            final gnUrl = 'https://news.google.com/rss/search?q=site:$domain&hl=en-US&gl=US&ceid=US:en';
+            final gnArticles = await _fetchRssFeedExpanded(gnUrl);
+            for (final a in gnArticles) {
+              final m = Map<String, dynamic>.from(a as Map);
+              m['source_name'] = sourceName;
+              final url = (m['original_url'] ?? '').toString();
+              if (url.isNotEmpty && seen.add(url)) allArticles.add(m);
+            }
+          } catch (_) {}
+        }
+      }
+
+      allArticles.sort((a, b) {
+        final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+        final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+        return db.compareTo(da);
+      });
+      final latestUrl = feedUrls.first;
+      final topics = await _fetchSourceTrendingTopics(sourceName, latestUrl, allArticles);
+      if (mounted) {
+        setState(() {
+          _flashAllSourceArticles = allArticles;
+          _flashDynamicTopics = topics;
+          if (topics.isNotEmpty) {
+            _flashSelectedTopic = topics.first['name'] as String;
+            _articles = List<dynamic>.from(topics.first['articles'] as List);
+          } else {
+            _flashSelectedTopic = null;
+            _articles = allArticles;
+          }
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Flash fetch error: $e');
+      if (mounted) setState(() { _articles = []; _loading = false; });
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchSourceTrendingTopics(
+    String sourceName,
+    String rssUrl,
+    List<dynamic> rssArticles,
+  ) async {
+    final sourceHomeUrls = <String, String>{
+      'Fox News': 'https://www.foxnews.com/',
+      'CNN': 'https://www.cnn.com/',
+      'NBC News': 'https://www.nbcnews.com/',
+      'ABC News': 'https://abcnews.go.com/',
+      'CBS News': 'https://www.cbsnews.com/',
+      'Politico': 'https://www.politico.com/',
+      'NPR': 'https://www.npr.org/',
+      'Reuters': 'https://www.reuters.com/',
+      'The Hill': 'https://thehill.com/',
+      'DW News': 'https://www.dw.com/en/',
+    };
+
+    final homeUrl = sourceHomeUrls[sourceName];
+    if (homeUrl != null) {
+      try {
+        final res = await http.get(
+          Uri.parse(homeUrl),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        ).timeout(const Duration(seconds: 12));
+
+        final html = res.body;
+        final trendingNames = <String>[];
+        final trendingHrefs = <String, String>{};
+
+        final htmlUp = html.toUpperCase();
+        final trendingLabels = [
+          'TRENDING',
+          'MOST POPULAR',
+          'MOST READ',
+          "WHAT'S TRENDING",
+          'TRENDING STORIES',
+          'TRENDING NOW',
+          'POPULAR STORIES',
+          'POPULAR NOW',
+          'IN THE NEWS',
+          'TOP STORIES',
+          'LIVE',
+          'NOW TRENDING',
+          'ALSO TRENDING',
+          'TRENDING ON',
+        ];
+        const skipPhrases = [
+          'log in', 'sign in', 'watch tv', 'watch live', 'watch now',
+          'more +', 'more news', 'subscribe', 'newsletter', 'my account',
+          'sign up', 'fox news', 'cnn', 'nbc news', 'abc news', 'cbs news',
+          'the hill', 'reuters', 'politico', 'npr', 'dw news',
+          'breaking news', 'latest news', 'top stories', 'most popular',
+          'most read', 'trending', 'u.s. news', 'world news',
+        ];
+
+        for (final label in trendingLabels) {
+          if (trendingNames.length >= 4) break;
+          final labelIdx = htmlUp.indexOf(label);
+          if (labelIdx < 0) continue;
+          final window = html.substring(labelIdx, (labelIdx + 3000).clamp(0, html.length));
+          final linkRe = RegExp(r'<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)</a>', caseSensitive: false);
+          final foundInThisLabel = <String>[];
+          for (final m in linkRe.allMatches(window)) {
+            final href = m.group(1) ?? '';
+            final rawText = (m.group(2) ?? '')
+                .replaceAll(RegExp(r'<[^>]+>'), '')
+                .replaceAll(RegExp(r'&amp;'), '&')
+                .replaceAll(RegExp(r'&[a-z]+;'), '')
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
+            if (rawText.length < 5 || rawText.length > 80) continue;
+            if (rawText.contains('{') || rawText.contains('<') || rawText.contains('©')) continue;
+            final wordCount = rawText.split(RegExp(r'\s+')).length;
+            if (wordCount < 2 || wordCount > 10) continue;
+            final lower = rawText.toLowerCase();
+            if (skipPhrases.any((s) => lower == s || lower == '$s:' || lower.startsWith('$s '))) continue;
+            if (wordCount == 2 && lower.split(' ').every((w) => w.length <= 3)) continue;
+            final upper = rawText.toUpperCase();
+            if (!trendingNames.contains(upper) && !foundInThisLabel.contains(upper)) {
+              foundInThisLabel.add(upper);
+              if (href.isNotEmpty) {
+                trendingHrefs[upper] = href.startsWith('http') ? href : '${homeUrl.replaceAll(RegExp(r'/$'), '')}$href';
+              }
+            }
+            if (foundInThisLabel.length >= 6) break;
+          }
+          if (foundInThisLabel.length >= 2) {
+            trendingNames.addAll(foundInThisLabel);
+            break;
+          }
+        }
+
+        // Strategy 2: __NEXT_DATA__ JSON
+        if (trendingNames.isEmpty) {
+          final nextData = RegExp(r'<script[^>]+id="__NEXT_DATA__"[^>]*>([\s\S]*?)</script>').firstMatch(html)?.group(1);
+          if (nextData != null) {
+            final trendCtx = RegExp(
+              r'"(?:trending|ticker|trendingTopics|breakingNews|trendBar|liveBar|liveTopics|breakingBar|tickers|alerts|breaking|topStories|featuredStories|popularTopics)"[\s\S]{0,500}?\[[\s\S]{0,5000}?\]',
+              caseSensitive: false,
+            ).firstMatch(nextData);
+            if (trendCtx != null) {
+              final hits = RegExp(r'"(?:label|title|name|text|headline|displayTitle)"\s*:\s*"([^"]{4,60})"').allMatches(trendCtx.group(0)!);
+              for (final h in hits.take(8)) {
+                final t = h.group(1)!.trim();
+                if (t.split(' ').length >= 2 && !t.contains('\\') && !t.contains('{')) {
+                  trendingNames.add(t.toUpperCase());
+                }
+              }
+            }
+          }
+        }
+
+        // Strategy 3: Topic pill links
+        if (trendingNames.isEmpty) {
+          final topHtml = html.substring(0, html.length.clamp(0, 15000));
+          final linkRe = RegExp(r'<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)</a>', caseSensitive: false);
+          final candidates = <String, int>{};
+          for (final m in linkRe.allMatches(topHtml)) {
+            final rawText = (m.group(2) ?? '')
+                .replaceAll(RegExp(r'<[^>]+>'), '')
+                .replaceAll(RegExp(r'&[a-z]+;'), '')
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
+            final wc = rawText.split(' ').length;
+            if (wc < 2 || wc > 6 || rawText.length < 5 || rawText.length > 50) continue;
+            if (rawText.contains('{') || rawText.contains('<')) continue;
+            final lower = rawText.toLowerCase();
+            if (skipPhrases.any((s) => lower == s || lower.startsWith('$s '))) continue;
+            candidates[rawText.toUpperCase()] = (candidates[rawText.toUpperCase()] ?? 0) + 1;
+          }
+          final pills = candidates.entries
+              .where((e) => e.value == 1)
+              .map((e) => e.key)
+              .take(6)
+              .toList();
+          if (pills.length >= 2) trendingNames.addAll(pills);
+        }
+
+        if (trendingNames.isNotEmpty) {
+          final topics = <Map<String, dynamic>>[];
+          final domain = Uri.parse(homeUrl).host;
+
+          for (final topicName in trendingNames.take(5)) {
+            String? bannerUrl;
+            List<dynamic> matched = [];
+
+            // Try to fetch dedicated topic page for accurate articles + banner image
+            final topicHref = trendingHrefs[topicName];
+            if (topicHref != null) {
+              try {
+                final pageRes = await http.get(
+                  Uri.parse(topicHref),
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  },
+                ).timeout(const Duration(seconds: 8));
+                final pageHtml = pageRes.body;
+
+                // Extract banner from og:image meta tag
+                bannerUrl = RegExp(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', caseSensitive: false)
+                    .firstMatch(pageHtml)?.group(1);
+                bannerUrl ??= RegExp(r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"', caseSensitive: false)
+                    .firstMatch(pageHtml)?.group(1);
+
+                // Strategy A: look for an embedded RSS/Atom feed link in the page <head>
+                // Fox News category pages expose a per-category RSS link — this gives the exact curated article list
+                final rssLinkRe = RegExp(
+                  r'<link[^>]+type="application/(?:rss|atom)\+xml"[^>]+href="([^"]+)"',
+                  caseSensitive: false,
+                );
+                final rssLinkMatch = rssLinkRe.firstMatch(pageHtml);
+                if (rssLinkMatch != null) {
+                  var feedUrl = rssLinkMatch.group(1)!;
+                  if (!feedUrl.startsWith('http')) {
+                    feedUrl = '${homeUrl.replaceAll(RegExp(r'/$'), '')}$feedUrl';
+                  }
+                  final feedArticles = await _fetchRssFeedExpanded(feedUrl);
+                  if (feedArticles.isNotEmpty) {
+                    matched = feedArticles;
+                  }
+                }
+
+                // Strategy B: if the href path looks like a category (e.g. /category/politics/wars/war-with-iran),
+                // try constructing a feeds.{domain}/path URL directly
+                if (matched.isEmpty) {
+                  final uri = Uri.parse(topicHref);
+                  final feedsBase = 'https://feeds.${uri.host.replaceFirst('www.', '')}';
+                  final candidateFeed = '$feedsBase${uri.path}';
+                  try {
+                    final feedArticles = await _fetchRssFeedExpanded(candidateFeed);
+                    if (feedArticles.isNotEmpty) matched = feedArticles;
+                  } catch (_) {}
+                }
+
+                // Strategy C: scan page HTML for any embedded RSS feed URL pointing to this domain
+                if (matched.isEmpty) {
+                  final embeddedFeedRe = RegExp(
+                    r'https?://feeds\.' + RegExp.escape(domain.replaceFirst('www.', '')) + r'[^\s"<>]+',
+                    caseSensitive: false,
+                  );
+                  final feedHit = embeddedFeedRe.firstMatch(pageHtml);
+                  if (feedHit != null) {
+                    try {
+                      final feedArticles = await _fetchRssFeedExpanded(feedHit.group(0)!);
+                      if (feedArticles.isNotEmpty) matched = feedArticles;
+                    } catch (_) {}
+                  }
+                }
+              } catch (e) {
+                debugPrint('Topic page fetch failed for $topicName: $e');
+              }
+            }
+
+            // Strategy D: Google News RSS search — most reliable source for topic articles.
+            // Google indexes news articles quickly and provides a much larger window than source RSS feeds.
+            try {
+              final topicKws = topicName
+                  .split(' ')
+                  .where((w) => w.length >= 3 && !_kFlashStopWords.contains(w.toLowerCase()))
+                  .take(5)
+                  .map((w) => Uri.encodeComponent(w))
+                  .join('+');
+              final sourceDomain = domain.replaceFirst('www.', '');
+              final googleUrl = 'https://news.google.com/rss/search'
+                  '?q=site:$sourceDomain+$topicKws'
+                  '&hl=en-US&gl=US&ceid=US:en';
+              final rawGoogle = await _fetchRssFeedExpanded(googleUrl);
+              debugPrint('Google News "$topicName" → ${rawGoogle.length} articles from $googleUrl');
+              if (rawGoogle.isNotEmpty) {
+                final googleArticles = rawGoogle.map((a) {
+                  final m = Map<String, dynamic>.from(a as Map);
+                  m['source_name'] = sourceName;
+                  return m;
+                }).toList();
+                final existingUrls = matched
+                    .map((a) => (a['original_url'] ?? '').toString())
+                    .toSet();
+                final existingTitles = matched
+                    .map((a) => (a['title'] ?? '').toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s]'), '').trim())
+                    .where((t) => t.isNotEmpty)
+                    .toSet();
+                final newFromGoogle = googleArticles.where((a) {
+                  final url = (a['original_url'] ?? '').toString();
+                  if (existingUrls.contains(url)) return false;
+                  final normalizedTitle = (a['title'] ?? '').toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s]'), '').trim();
+                  if (normalizedTitle.isEmpty) return true;
+                  if (existingTitles.contains(normalizedTitle)) return false;
+                  return !existingTitles.any((t) {
+                    final shorter = normalizedTitle.length < t.length ? normalizedTitle : t;
+                    final longer = normalizedTitle.length < t.length ? t : normalizedTitle;
+                    return shorter.length > 20 && longer.contains(shorter);
+                  });
+                }).toList();
+                matched = [...matched, ...newFromGoogle];
+              }
+            } catch (e) {
+              debugPrint('Google News RSS failed for $topicName: $e');
+            }
+
+            // Fallback augmentation: keyword matches from the full source RSS pool
+            if (matched.length < 5) {
+              final keyWords = topicName.toLowerCase()
+                  .split(' ')
+                  .where((w) => w.length >= 3 && !_kFlashStopWords.contains(w))
+                  .toList();
+              final augmentKeys = keyWords.where((w) => w.length >= 4).toList();
+              final fallbackKeys = augmentKeys.isNotEmpty ? augmentKeys : keyWords;
+              if (fallbackKeys.isNotEmpty) {
+                final existingUrls = matched
+                    .map((a) => (a['original_url'] ?? '').toString())
+                    .where((u) => u.isNotEmpty)
+                    .toSet();
+                final additional = rssArticles.where((a) {
+                  final url = (a['original_url'] ?? '').toString();
+                  if (url.isNotEmpty && existingUrls.contains(url)) return false;
+                  final t = (a['title'] ?? '').toString().toLowerCase();
+                  return fallbackKeys.any((w) => t.contains(w));
+                }).toList();
+                matched = [...matched, ...additional];
+              }
+            }
+
+            if (matched.isNotEmpty) {
+              matched.sort((a, b) {
+                final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+                final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+                return db.compareTo(da);
+              });
+              topics.add({
+                'name': topicName,
+                'articles': matched,
+                if (bannerUrl != null && bannerUrl.isNotEmpty) 'bannerUrl': bannerUrl,
+              });
+            }
+          }
+          if (topics.isNotEmpty) return topics;
+        }
+      } catch (e) {
+        debugPrint('Trending scrape failed for $sourceName: $e');
+      }
+    }
+    return _extractFlashTopics(rssArticles);
+  }
+
+  Future<List<dynamic>> _fetchRssFeedExpanded(String feedUrl) async {
+    try {
+      final res = await http.get(Uri.parse(feedUrl), headers: {'User-Agent': 'TruBrief/1.0'}).timeout(const Duration(seconds: 10));
+      final xml = res.body;
+      final items = RegExp(r'<item>(.*?)</item>', dotAll: true).allMatches(xml);
+      final List<dynamic> articles = [];
+      final sourceNameMatch = RegExp(r'<title>(.*?)</title>', dotAll: true).firstMatch(xml)?.group(1) ?? 'News';
+      final cleanSourceName = _cleanXmlContent(sourceNameMatch).split('\n').first.trim();
+      for (var match in items) {
+        final item = match.group(1)!;
+        final rawTitle = RegExp(r'<title>(.*?)</title>', dotAll: true).firstMatch(item)?.group(1) ?? '';
+        final link = (RegExp(r'<link>(.*?)</link>', dotAll: true).firstMatch(item)?.group(1) ??
+                      RegExp(r'<guid[^>]*>(.*?)</guid>', dotAll: true).firstMatch(item)?.group(1) ?? '').trim();
+        final pubDateStr = RegExp(r'<pubDate>(.*?)</pubDate>', dotAll: true).firstMatch(item)?.group(1)?.trim();
+        final desc = RegExp(r'<description>(.*?)</description>', dotAll: true).firstMatch(item)?.group(1) ?? '';
+        final imgMatch = RegExp(r'<media:content[^>]*url="([^"]+)"', dotAll: true).firstMatch(item) ??
+                         RegExp(r'<enclosure[^>]*url="([^"]+)"', dotAll: true).firstMatch(item);
+        final imageUrl = imgMatch?.group(1);
+        final title = _cleanXmlContent(rawTitle);
+        final titleParts = title.split(' - ');
+        final cleanTitle = titleParts.length > 1 ? titleParts.sublist(0, titleParts.length - 1).join(' - ') : title;
+        if (link.isEmpty || cleanTitle.isEmpty) continue;
+        final cleanDesc = _cleanDescription(desc);
+        articles.add({
+          'id': link.hashCode.toString(),
+          'title': cleanTitle,
+          'original_url': link,
+          'image_url': imageUrl,
+          'summary_brief': cleanDesc.isNotEmpty ? cleanDesc : null,
+          'category': 'Tru Flash',
+          'source_name': cleanSourceName,
+          'source_id': null,
+          'created_at': _parseRssDate(pubDateStr),
+        });
+      }
+      return articles;
+    } catch (e) {
+      debugPrint('RSS expanded feed error for $feedUrl: $e');
+      return [];
+    }
   }
 
   Future<void> _checkTutorial() async {
@@ -506,6 +1171,12 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
     } else {
       await Supabase.instance.client.auth.updateUser(UserAttributes(data: {'tutorial_seen': true}));
       if (mounted) setState(() => _showTutorial = false);
+    }
+  }
+
+  void _regressTutorial() {
+    if (_tutorialStep > 0) {
+      setState(() => _tutorialStep--);
     }
   }
 
@@ -978,8 +1649,21 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
     return merged;
   }
 
-  Future<List<dynamic>> _fetchGoogleNewsQuery(String encodedQuery) async {
-    final url = 'https://news.google.com/rss/search?q=when:72h+$encodedQuery&hl=en-US&gl=US&ceid=US:en';
+  String _getGoogleNewsLocaleParams() {
+    final locale = WidgetsBinding.instance.platformDispatcher.locale;
+    final lang = locale.languageCode.toLowerCase();
+    final country = locale.countryCode?.toUpperCase() ?? '';
+    if (lang == 'pt' || country == 'BR') return 'hl=pt-BR&gl=BR&ceid=BR:pt';
+    if (lang == 'es') return 'hl=es&gl=ES&ceid=ES:es';
+    if (lang == 'fr') return 'hl=fr&gl=FR&ceid=FR:fr';
+    if (lang == 'de') return 'hl=de&gl=DE&ceid=DE:de';
+    if (lang == 'ja') return 'hl=ja&gl=JP&ceid=JP:ja';
+    return 'hl=en-US&gl=US&ceid=US:en';
+  }
+
+  Future<List<dynamic>> _fetchGoogleNewsQuery(String encodedQuery, {String? localeParams}) async {
+    final params = localeParams ?? _getGoogleNewsLocaleParams();
+    final url = 'https://news.google.com/rss/search?q=when:72h+$encodedQuery&$params';
     try {
       final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
       final xml = res.body;
@@ -992,10 +1676,6 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
         final pubDateStr = RegExp(r'<pubDate>(.*?)</pubDate>', dotAll: true).firstMatch(item)?.group(1)?.trim();
         final sourceMatch = RegExp(r'<source[^>]*>(.*?)</source>', dotAll: true).firstMatch(item);
         final sourceName = sourceMatch?.group(1)?.trim() ?? 'Local News';
-        // Don't use Google News RSS thumbnails — they're Google's placeholder logo.
-        // _repairMissingImages will scrape the real article OG image instead.
-        const imageUrl = null;
-
         final title = _cleanXmlContent(rawTitle);
         final titleParts = title.split(' - ');
         final cleanTitle = titleParts.length > 1 ? titleParts.sublist(0, titleParts.length - 1).join(' - ') : title;
@@ -1006,17 +1686,102 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
           'id': link.hashCode.toString(),
           'title': cleanTitle,
           'original_url': link,
-          'image_url': imageUrl,
+          'image_url': null,
           'summary_brief': null,
           'category': 'Local Brief',
           'source_name': sourceName,
           'source_id': null,
-          'created_at': pubDateStr != null ? (DateTime.tryParse(pubDateStr) ?? DateTime.now()).toIso8601String() : DateTime.now().toIso8601String(),
+          'created_at': _parseRssDate(pubDateStr),
         });
       }
       return articles;
     } catch (e) {
       debugPrint('Google News local fetch error: $e');
+      return [];
+    }
+  }
+
+  Future<void> _fetchFlashBriefArticles() async {
+    if (mounted) setState(() => _loading = true);
+    try {
+      final feeds = [
+        'https://feeds.foxnews.com/foxnews/latest',
+        'https://rss.cnn.com/rss/edition.rss',
+        'https://feeds.nbcnews.com/nbcnews/public/news',
+        'https://rss.politico.com/politics-news.xml',
+        'https://feeds.abcnews.com/abcnews/topstories',
+        'https://feeds.cbsnews.com/cbsnews/rss/latest',
+        'https://feeds.npr.org/1001/rss.xml',
+        'https://feeds.reuters.com/reuters/topNews',
+        'https://thehill.com/rss/syndicator/19110',
+        'https://rss.dw.com/rdf/rss-en-top',
+      ];
+      final List<Future<List<dynamic>>> fetches = feeds.map((feedUrl) => _fetchRssFeed(feedUrl)).toList();
+      fetches.add(_fetchGoogleNewsTopStories());
+      final results = await Future.wait(fetches.map((f) => f.catchError((_) => <dynamic>[])));
+      final seen = <String>{};
+      final merged = <dynamic>[];
+      for (final articles in results) {
+        for (final article in articles) {
+          final url = (article['original_url'] ?? '').toString();
+          if (url.isNotEmpty && seen.add(url)) merged.add(article);
+        }
+      }
+      merged.sort((a, b) {
+        final da = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
+        final db = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime(0);
+        return db.compareTo(da);
+      });
+      final deduped = _deduplicateByTopic(merged);
+      if (mounted) setState(() { _articles = deduped; _loading = false; });
+    } catch (e) {
+      debugPrint('Tru Flash error: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<List<dynamic>> _fetchGoogleNewsTopStories() async {
+    return _fetchGoogleNewsQuery(Uri.encodeComponent('top stories'));
+  }
+
+  Future<List<dynamic>> _fetchRssFeed(String feedUrl) async {
+    try {
+      final res = await http.get(Uri.parse(feedUrl), headers: {'User-Agent': 'TruBrief/1.0'}).timeout(const Duration(seconds: 10));
+      final xml = res.body;
+      final items = RegExp(r'<item>(.*?)</item>', dotAll: true).allMatches(xml);
+      final List<dynamic> articles = [];
+      final sourceNameMatch = RegExp(r'<title>(.*?)</title>', dotAll: true).firstMatch(xml)?.group(1) ?? 'News';
+      final cleanSourceName = _cleanXmlContent(sourceNameMatch).split('\n').first.trim();
+      for (var match in items.take(15)) {
+        final item = match.group(1)!;
+        final rawTitle = RegExp(r'<title>(.*?)</title>', dotAll: true).firstMatch(item)?.group(1) ?? '';
+        final link = (RegExp(r'<link>(.*?)</link>', dotAll: true).firstMatch(item)?.group(1) ??
+                      RegExp(r'<guid[^>]*>(.*?)</guid>', dotAll: true).firstMatch(item)?.group(1) ?? '').trim();
+        final pubDateStr = RegExp(r'<pubDate>(.*?)</pubDate>', dotAll: true).firstMatch(item)?.group(1)?.trim();
+        final desc = RegExp(r'<description>(.*?)</description>', dotAll: true).firstMatch(item)?.group(1) ?? '';
+        final imgMatch = RegExp(r'<media:content[^>]*url="([^"]+)"', dotAll: true).firstMatch(item) ??
+                         RegExp(r'<enclosure[^>]*url="([^"]+)"', dotAll: true).firstMatch(item);
+        final imageUrl = imgMatch?.group(1);
+        final title = _cleanXmlContent(rawTitle);
+        final titleParts = title.split(' - ');
+        final cleanTitle = titleParts.length > 1 ? titleParts.sublist(0, titleParts.length - 1).join(' - ') : title;
+        if (link.isEmpty || cleanTitle.isEmpty) continue;
+        final cleanDesc = _cleanDescription(desc);
+        articles.add({
+          'id': link.hashCode.toString(),
+          'title': cleanTitle,
+          'original_url': link,
+          'image_url': imageUrl,
+          'summary_brief': cleanDesc.isNotEmpty ? cleanDesc.substring(0, cleanDesc.length.clamp(0, 200)) : null,
+          'category': 'Tru Flash',
+          'source_name': cleanSourceName,
+          'source_id': null,
+          'created_at': _parseRssDate(pubDateStr),
+        });
+      }
+      return articles;
+    } catch (e) {
+      debugPrint('RSS feed error for $feedUrl: $e');
       return [];
     }
   }
@@ -1031,7 +1796,14 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
       if (search.isNotEmpty) {
         query = query.ilike('title', '%$search%');
       } else {
-        if (_selectedCategory == 'Local Brief' && _locationType != 'none') {
+        if (_selectedCategory == 'Tru Flash') {
+          final sourceEntry = _kFlashSources.firstWhere(
+            (s) => s['name'] == _flashSelectedSource,
+            orElse: () => _kFlashSources.first,
+          );
+          await _fetchFlashBySourceAndTopic(_flashSelectedSource, sourceEntry['url']!);
+          return;
+        } else if (_selectedCategory == 'Local Brief' && _locationType != 'none') {
           final localArticles = _deduplicateByTopic(_filterGeoRestricted(await _fetchGoogleNewsLocal()));
           if (mounted) {
             setState(() {
@@ -1174,29 +1946,8 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
       if (article['image_url'] == null || article['image_url'].toString().isEmpty) {
         final url = _cleanXmlContent(article['original_url']);
         if (url.isEmpty) continue;
-
         try {
-          // For Google News redirect URLs, follow redirects to get the real article URL
-          String resolvedUrl = url;
-          if (Uri.tryParse(url)?.host.contains('google.com') == true) {
-            try {
-              final redirect = await http.get(
-                Uri.parse(url),
-                headers: {'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)'},
-              ).timeout(const Duration(seconds: 5));
-              final finalUrl = redirect.request?.url.toString() ?? '';
-              if (finalUrl.isNotEmpty && !(Uri.tryParse(finalUrl)?.host.contains('google.com') ?? true)) {
-                resolvedUrl = finalUrl;
-              } else {
-                continue;
-              }
-            } catch (_) {
-              continue;
-            }
-          }
-
-          final imageUrl = await _scrapeImageUrl(resolvedUrl);
-          
+          final imageUrl = await _scrapeImageUrl(url);
           if (imageUrl != null && imageUrl.isNotEmpty) {
             final isInMemoryOnly = article['source_id'] == null;
             if (!isInMemoryOnly) {
@@ -1282,7 +2033,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
               'title': _cleanXmlContent(title),
               'original_url': originalUrl,
               'image_url': imageUrl,
-              'summary_brief': _cleanXmlContent(description),
+              'summary_brief': _cleanDescription(description),
               'category': source['category'],
               'source_name': source['name'],
               'source_id': source['id'],
@@ -1374,6 +2125,47 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
     }
   }
 
+  static const _kMonths = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+  };
+
+  String _parseRssDate(String? raw) {
+    if (raw == null || raw.isEmpty) return DateTime.now().toIso8601String();
+    // Try ISO 8601 first
+    final iso = DateTime.tryParse(raw);
+    if (iso != null) return iso.toIso8601String();
+    // Parse RFC 2822: "Tue, 01 Apr 2025 08:30:00 +0000" or "...GMT"
+    try {
+      final parts = raw.trim().split(RegExp(r'[\s,]+'));
+      // parts may look like: ['Tue', '01', 'Apr', '2025', '08:30:00', '+0000']
+      // or without day-of-week: ['01', 'Apr', '2025', '08:30:00', '+0000']
+      final idx = (parts.length >= 6) ? 1 : 0;
+      final day = int.parse(parts[idx]);
+      final month = _kMonths[parts[idx + 1].toLowerCase().substring(0, 3)] ?? 1;
+      final year = int.parse(parts[idx + 2]);
+      final timeParts = parts[idx + 3].split(':');
+      final hour = int.parse(timeParts[0]);
+      final minute = int.parse(timeParts[1]);
+      final second = timeParts.length > 2 ? int.parse(timeParts[2]) : 0;
+      int tzOffset = 0;
+      if (parts.length > idx + 4) {
+        final tz = parts[idx + 4];
+        if (tz != 'GMT' && tz != 'UTC' && tz.length >= 5) {
+          final sign = tz[0] == '-' ? -1 : 1;
+          final tzH = int.tryParse(tz.substring(1, 3)) ?? 0;
+          final tzM = int.tryParse(tz.substring(3, 5)) ?? 0;
+          tzOffset = sign * (tzH * 60 + tzM);
+        }
+      }
+      final dt = DateTime.utc(year, month, day, hour, minute, second)
+          .subtract(Duration(minutes: tzOffset));
+      return dt.toIso8601String();
+    } catch (_) {
+      return DateTime.now().toIso8601String();
+    }
+  }
+
   String _cleanXmlContent(String? text) {
     if (text == null) return '';
     String cleaned = text.trim();
@@ -1384,6 +2176,17 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
       cleaned = cleaned.substring(0, cleaned.length - 3);
     }
     return cleaned.trim();
+  }
+
+  String _cleanDescription(String? text) {
+    if (text == null || text.isEmpty) return '';
+    String cleaned = text.trim();
+    if (cleaned.startsWith('<![CDATA[')) cleaned = cleaned.substring(9);
+    if (cleaned.endsWith(']]>')) cleaned = cleaned.substring(0, cleaned.length - 3);
+    cleaned = HtmlCharacterEntities.decode(cleaned);
+    cleaned = cleaned.replaceAll(RegExp(r'<[^>]+>'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return cleaned;
   }
 
   String _unescapeHtml(String? text) {
@@ -1546,6 +2349,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
           sourceLoginUrl: sourceLoginUrl,
           initialIsSaved: _savedArticleIds.contains(article['id']?.toString() ?? ''),
           onToggleSave: () => _toggleSaveArticle(article),
+          articleId: article['id']?.toString(),
         ),
       ),
     );
@@ -1559,6 +2363,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
       if (mounted) {
         _fetchUserData();
         _fetchArticles();
+        _loadFlashEnabledSources();
       }
     });
   }
@@ -1689,7 +2494,15 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                   ),
                   child: KeyedSubtree(
                     key: ValueKey(_tutorialStep),
-                    child: Container(
+                    child: GestureDetector(
+                      onHorizontalDragEnd: (details) {
+                        if ((details.primaryVelocity ?? 0) < -200) {
+                          _advanceTutorial();
+                        } else if ((details.primaryVelocity ?? 0) > 200) {
+                          _regressTutorial();
+                        }
+                      },
+                      child: Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFF161618),
                         borderRadius: BorderRadius.circular(24),
@@ -1801,6 +2614,20 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                                   const SizedBox(height: 24),
                                   Row(
                                     children: [
+                                      if (_tutorialStep > 0) ...[
+                                        GestureDetector(
+                                          onTap: _regressTutorial,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(30),
+                                              border: Border.all(color: Colors.white24),
+                                            ),
+                                            child: const Text('Back', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14, decoration: TextDecoration.none)),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                      ],
                                       Row(
                                         children: List.generate(totalSteps, (i) => AnimatedContainer(
                                           duration: const Duration(milliseconds: 300),
@@ -1868,7 +2695,328 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                       ),
                     ),
                   ),
+                  ),
                 ),
+      ),
+    );
+  }
+
+  Widget _buildFlashSourceHeader() {
+    final enabledSources = _flashEnabledSources.isNotEmpty
+        ? _flashEnabledSources
+        : _kFlashSources.map((s) => s['name']!).toList();
+
+    return Container(
+      color: const Color(0xFF0A0A0A),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.bolt_rounded, color: Color(0xFFFF6200), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: GestureDetector(
+              onTap: () async {
+                final selected = await showModalBottomSheet<String>(
+                  context: context,
+                  backgroundColor: const Color(0xFF111111),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  builder: (ctx) => SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(height: 12),
+                        Container(width: 36, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+                        const SizedBox(height: 16),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 20),
+                          child: Text('Select Source', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                        ),
+                        const SizedBox(height: 12),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ...enabledSources.map((name) => InkWell(
+                                  onTap: () => Navigator.pop(ctx, name),
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                                    decoration: BoxDecoration(
+                                      border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06))),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(child: Text(name, style: TextStyle(color: _flashSelectedSource == name ? const Color(0xFFFF6200) : Colors.white, fontWeight: FontWeight.w600, fontSize: 15))),
+                                        if (_flashSelectedSource == name) const Icon(Icons.check, color: Color(0xFFFF6200), size: 18),
+                                      ],
+                                    ),
+                                  ),
+                                )),
+                                const SizedBox(height: 16),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+                if (selected != null && selected != _flashSelectedSource && mounted) {
+                  setState(() {
+                    _flashSelectedSource = selected;
+                    _flashSelectedTopic = null;
+                    _loading = true;
+                  });
+                  _fetchArticles();
+                }
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _flashSelectedSource,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white54, size: 20),
+                ],
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() { _loading = true; });
+              _fetchArticles();
+            },
+            child: const Icon(Icons.refresh_rounded, color: Colors.white38, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlashTopicRow() {
+    if (_flashDynamicTopics.isEmpty) return const SizedBox.shrink();
+    final count = _flashDynamicTopics.length;
+    final cols = count <= 3 ? count : (count == 4 ? 2 : 3);
+    return Container(
+      color: const Color(0xFF0D0D0D),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final chipW = (constraints.maxWidth - (cols - 1) * 8) / cols;
+          return Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: List.generate(_flashDynamicTopics.length, (index) {
+              final topic = _flashDynamicTopics[index];
+              final name = topic['name'] as String;
+              final isSelected = _flashSelectedTopic == name;
+              return GestureDetector(
+                onTap: () {
+                  if (_flashSelectedTopic == name) return;
+                  setState(() {
+                    _flashSelectedTopic = name;
+                    _articles = List<dynamic>.from(topic['articles'] as List);
+                  });
+                },
+                child: Container(
+                  width: chipW,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(4),
+                    border: isSelected ? null : Border.all(color: Colors.white24, width: 1),
+                  ),
+                  child: Text(
+                    name,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isSelected ? Colors.black : Colors.white70,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFlashTopicBanner() {
+    if (_flashSelectedTopic == null || _flashDynamicTopics.isEmpty) return const SizedBox.shrink();
+    final topicData = _flashDynamicTopics.firstWhere(
+      (t) => t['name'] == _flashSelectedTopic,
+      orElse: () => {},
+    );
+    if (topicData.isEmpty) return const SizedBox.shrink();
+    final topicName = _flashSelectedTopic!;
+    final bannerUrl = topicData['bannerUrl']?.toString();
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.6), width: 1.5),
+        color: const Color(0xFF1A1A1A),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (bannerUrl != null && bannerUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              child: Stack(
+                children: [
+                  Image.network(
+                    bannerUrl,
+                    width: double.infinity,
+                    height: 160,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _buildTextOnlyBannerTop(topicName),
+                  ),
+                  Positioned(
+                    top: 10,
+                    left: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6200),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.bolt, color: Colors.white, size: 13),
+                          SizedBox(width: 3),
+                          Text(
+                            'TRENDING',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            _buildTextOnlyBannerTop(topicName),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  topicName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 22,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6200),
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Live coverage',
+                      style: TextStyle(
+                        color: Color(0xFFFF6200),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextOnlyBannerTop(String topicName) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+      child: Container(
+        width: double.infinity,
+        height: 90,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF2A0E00), Color(0xFF1A0800), Color(0xFF0D0400)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Center(
+              child: Text(
+                topicName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6200),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.bolt, color: Colors.white, size: 13),
+                    SizedBox(width: 3),
+                    Text(
+                      'TRENDING',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1900,7 +3048,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                     text: 'Tru',
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
-                      fontSize: 28,
+                      fontSize: 32,
                       letterSpacing: -1.0,
                     ),
                   ),
@@ -1908,7 +3056,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                     text: 'Brief',
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
-                      fontSize: 28,
+                      fontSize: 32,
                       color: Color(0xFFFF6200),
                       letterSpacing: -1.0,
                     ),
@@ -1933,14 +3081,6 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
             },
           ),
           if (!_isSearching) ...[
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 26),
-              color: Colors.white,
-              onPressed: () {
-                _fetchArticles();
-                _fetchNewArticlesFromSources();
-              },
-            ),
             IconButton(
               icon: const Icon(Icons.bookmark_rounded, size: 24),
               color: Colors.white,
@@ -1974,7 +3114,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
         child: Column(
           children: [
             Builder(builder: (context) {
-              final visibleTabs = _selectedCategories.where((c) => !_hiddenTabs.contains(c)).toList();
+              final visibleTabs = _selectedCategories.where((c) => !_hiddenTabs.contains(c) && c != 'Tru Flash').toList();
               final displayTabs = visibleTabs.take(3).toList();
               const hasMore = true;
 
@@ -1988,7 +3128,7 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                   borderRadius: BorderRadius.circular(8),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: const Color(0xFF1C1C1E),
@@ -2002,15 +3142,17 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                       final parts = cat.split(' ');
                       if (parts.length >= 2) {
                         return RichText(
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                           text: TextSpan(
                             children: [
-                              TextSpan(text: parts[0], style: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: -0.5)),
-                              TextSpan(text: ' ${parts.skip(1).join(' ')}', style: TextStyle(color: isSelected ? const Color(0xFFFF6200) : const Color(0xFFFF6200).withValues(alpha: 0.4), fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: -0.5)),
+                              TextSpan(text: parts[0], style: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: -0.5)),
+                              TextSpan(text: ' ${parts.skip(1).join(' ')}', style: TextStyle(color: isSelected ? const Color(0xFFFF6200) : const Color(0xFFFF6200).withValues(alpha: 0.4), fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: -0.5)),
                             ],
                           ),
                         );
                       }
-                      return Text(cat.toUpperCase(), style: TextStyle(color: isSelected ? Colors.white : Colors.white60, fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.8));
+                      return Text(cat.toUpperCase(), style: TextStyle(color: isSelected ? Colors.white : Colors.white60, fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 0.8), overflow: TextOverflow.ellipsis, maxLines: 1);
                     }(),
                   ),
                 );
@@ -2021,13 +3163,53 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                 margin: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Row(
                   children: [
-                    const SizedBox(width: 16),
-                    ...displayTabs.map((cat) => Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: cat == 'Tru Brief'
-                          ? KeyedSubtree(key: _truBriefTabKey, child: _tabChip(cat))
-                          : _tabChip(cat),
-                    )),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Row(
+                        children: displayTabs.map((cat) => Flexible(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: SizedBox(
+                              height: 40,
+                              child: cat == 'Tru Brief'
+                                  ? KeyedSubtree(key: _truBriefTabKey, child: _tabChip(cat))
+                                  : _tabChip(cat),
+                            ),
+                          ),
+                        )).toList(),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() { _selectedCategory = 'Tru Flash'; _loading = true; });
+                        _fetchArticles();
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        margin: const EdgeInsets.only(right: 8),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _selectedCategory == 'Tru Flash'
+                              ? const Color(0xFFFFD700).withValues(alpha: 0.18)
+                              : const Color(0xFFFFD700).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _selectedCategory == 'Tru Flash'
+                                ? const Color(0xFFFFD700)
+                                : const Color(0xFFFFD700).withValues(alpha: 0.5),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.bolt_rounded,
+                          size: 20,
+                          color: _selectedCategory == 'Tru Flash'
+                              ? const Color(0xFFFFD700)
+                              : const Color(0xFFFFD700).withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
                     if (hasMore)
                       InkWell(
                         onTap: () {
@@ -2227,6 +3409,41 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                   ],
                 ),
               ),
+            if (_selectedCategory == 'Tru Flash') ...[
+              _buildFlashSourceHeader(),
+              _buildFlashTopicRow(),
+            ],
+            if (_selectedCategory != 'Tru Brief' &&
+                _selectedCategory != 'Local Brief' &&
+                _selectedCategory != 'National Brief' &&
+                _selectedCategory != 'Tru Flash') ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.grid_view_rounded, size: 13, color: Color(0xFFFF6200)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _selectedCategory.toUpperCase(),
+                        style: const TextStyle(
+                          color: Color(0xFFFF6200),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => setState(() { _selectedCategory = 'Tru Brief'; _loading = true; _fetchArticles(); }),
+                      child: const Icon(Icons.close, size: 16, color: Colors.white38),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFF222222)),
+            ],
             Expanded(
               key: _articleListKey,
               child: _loading
@@ -2342,9 +3559,12 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                           ],
                         )
                       : ListView.builder(
-                          itemCount: _articles.length + 1,
+                          itemCount: _articles.length + (_selectedCategory == 'Tru Flash' && _flashSelectedTopic != null ? 2 : 1),
                           itemBuilder: (context, index) {
-                    if (index == _articles.length) {
+                    final bool showFlashBanner = _selectedCategory == 'Tru Flash' && _flashSelectedTopic != null;
+                    if (showFlashBanner && index == 0) return _buildFlashTopicBanner();
+                    final articleIndex = showFlashBanner ? index - 1 : index;
+                    if (articleIndex == _articles.length) {
                       // Local Brief uses Google News — subscription source notices don't apply
                       if (_selectedCategory == 'Local Brief') return const SizedBox.shrink();
                       final shortCat = _selectedCategory.replaceAll(' Brief', '').replaceAll(' News', '').trim();
@@ -2380,12 +3600,12 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                         ),
                       );
                     }
-                    final article = Map<String, dynamic>.from(_articles[index] as Map);
+                    final article = Map<String, dynamic>.from(_articles[articleIndex] as Map);
                     final String? imageUrl = article['image_url'];
                     final String title = _unescapeHtml(article['title'] ?? 'No title');
                     final String source = _unescapeHtml(article['source_name'] ?? 'Unknown Source');
-                    final String? summary = _unescapeHtml(article['summary_brief']);
-                    final bool isFeatured = index == 0;
+                    final String? summary = _cleanDescription(article['summary_brief']);
+                    final bool isFeatured = articleIndex == 0;
                     final List<dynamic> relatedArticles = List<dynamic>.from(article['_related_articles'] as List? ?? []);
 
                     return Card(
@@ -2442,13 +3662,16 @@ class _ArticlesScreenState extends State<ArticlesScreen> with TickerProviderStat
                                 children: [
                                   Row(
                                     children: [
-                                      Text(
-                                        source.toUpperCase(),
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w800,
-                                          color: Color(0xFFFF6200),
-                                          letterSpacing: 1.2,
+                                      Flexible(
+                                        child: Text(
+                                          source.toUpperCase(),
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFFFF6200),
+                                            letterSpacing: 1.2,
+                                          ),
                                         ),
                                       ),
                                       const Spacer(),
@@ -2607,6 +3830,20 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
   int? _tutorialStep;
   bool _myFeedExpanded = false;
   bool _availableFeedsExpanded = false;
+  bool _truFlashExpanded = false;
+  List<String> _flashSourcesEnabled = [];
+  static const List<Map<String, String>> _kFlashSourceList = [
+    {'name': 'Fox News', 'url': 'https://feeds.foxnews.com/foxnews/latest'},
+    {'name': 'CNN', 'url': 'https://rss.cnn.com/rss/edition.rss'},
+    {'name': 'NBC News', 'url': 'https://feeds.nbcnews.com/nbcnews/public/news'},
+    {'name': 'Politico', 'url': 'https://rss.politico.com/politics-news.xml'},
+    {'name': 'ABC News', 'url': 'https://feeds.abcnews.com/abcnews/topstories'},
+    {'name': 'CBS News', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/latest'},
+    {'name': 'NPR', 'url': 'https://feeds.npr.org/1001/rss.xml'},
+    {'name': 'Reuters', 'url': 'https://feeds.reuters.com/reuters/topNews'},
+    {'name': 'The Hill', 'url': 'https://thehill.com/rss/syndicator/19110'},
+    {'name': 'DW News', 'url': 'https://rss.dw.com/rdf/rss-en-top'},
+  ];
   final TextEditingController _categorySearchController = TextEditingController();
   String _categorySearchQuery = '';
   bool _isPremium = false;
@@ -3310,6 +4547,10 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
         } catch (_) {}
       }
 
+      final localPrefs = await SharedPreferences.getInstance();
+      final savedFlash = localPrefs.getStringList('flash_enabled_sources');
+      final flashEnabled = savedFlash ?? _kFlashSourceList.map((s) => s['name']!).toList();
+
       if (catData != null && catData.isNotEmpty && mounted) {
         setState(() {
           _categories = allCategories;
@@ -3322,6 +4563,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
           _trialStartedAt = trialStartedAt;
           _subscriptionRenewsAt = renewsAt;
           _customSources = customSources;
+          _flashSourcesEnabled = flashEnabled;
           _loading = false;
         });
       } else {
@@ -3379,67 +4621,73 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
     }
   }
   Widget _buildLocationHeader() {
-    return Material(
-      key: _locationRowKey,
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => setState(() => _showLocationEditor = !_showLocationEditor),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [const Color(0xFF1A1A1A), const Color(0xFF001A10)],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
+
+      ),
+      child: Material(
+        key: _locationRowKey,
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => setState(() => _showLocationEditor = !_showLocationEditor),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF0A2018), Color(0xFF050F0C)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
             ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: _locationType != 'none' ? 0.5 : 0.2), width: 1.2),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF6200).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    _locationType == 'exact' ? Icons.gps_fixed : (_locationType == 'zip' ? Icons.location_on : Icons.location_off),
-                    color: const Color(0xFFFF6200), size: 18,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Location Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
-                    Text(
-                      _locationType == 'exact'
-                          ? 'GPS location${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
-                          : (_locationType == 'zip'
-                              ? 'Postal code $_zipCode${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
-                              : 'Location not set'),
-                      style: TextStyle(fontSize: 13, color: _locationType != 'none' ? const Color(0xFFFF6200).withValues(alpha: 0.7) : Colors.white38),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                AnimatedRotation(
-                  turns: _showLocationEditor ? 0.5 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: Container(
-                    width: 28, height: 28,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6200).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(7),
+                      color: const Color(0xFFFF6200).withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 20),
+                    child: Icon(
+                      _locationType == 'exact' ? Icons.gps_fixed : (_locationType == 'zip' ? Icons.location_on : Icons.location_off),
+                      color: const Color(0xFFFF6200), size: 22,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Location Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                      Text(
+                        _locationType == 'exact'
+                            ? 'GPS location${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
+                            : (_locationType == 'zip'
+                                ? 'Postal code $_zipCode${_city != null && _city!.isNotEmpty ? " · $_city" : ""}'
+                                : 'Location not set'),
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFFF6200)),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: _showLocationEditor ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Container(
+                      width: 30, height: 30,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6200).withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 22),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3715,57 +4963,63 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
   }
 
   Widget _buildMyFeedHeader() {
-    return Material(
-      key: _myFeedRowKey,
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => setState(() => _myFeedExpanded = !_myFeedExpanded),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [const Color(0xFF1A1A1A), const Color(0xFF2A1800)],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
+
+      ),
+      child: Material(
+        key: _myFeedRowKey,
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => setState(() => _myFeedExpanded = !_myFeedExpanded),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF241000), Color(0xFF140800)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
             ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.2),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF6200).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.rss_feed, color: Color(0xFFFF6200), size: 18),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('My Feed', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
-                    Text(_myFeedExpanded ? 'Drag to reorder • Tap to manage' : 'Manage your active feed tabs', style: const TextStyle(fontSize: 13, color: Colors.white38)),
-                  ],
-                ),
-                const Spacer(),
-                AnimatedRotation(
-                  turns: _myFeedExpanded ? 0.5 : 0.0,
-                  duration: const Duration(milliseconds: 250),
-                  child: Container(
-                    width: 28, height: 28,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6200).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(7),
+                      color: const Color(0xFFFF6200).withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 20),
+                    child: const Icon(Icons.rss_feed, color: Color(0xFFFF6200), size: 22),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('My Feed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                      Text(_myFeedExpanded ? 'Drag to reorder • Tap to manage' : 'Manage your active feed tabs', style: const TextStyle(fontSize: 12, color: Color(0xFFFF6200))),
+                    ],
+                  ),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: _myFeedExpanded ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Container(
+                      width: 30, height: 30,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6200).withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6200), size: 22),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3942,68 +5196,74 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
   }
 
   Widget _buildAvailableFeedsHeader() {
-    return Material(
-                  key: _availableFeedsRowKey,
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(14),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () => setState(() {
-      _availableFeedsExpanded = !_availableFeedsExpanded;
-      if (!_availableFeedsExpanded) {
-        _categorySearchController.clear();
-        _categorySearchQuery = '';
-      }
-    }),
-                    child: Ink(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+
+      ),
+      child: Material(
+        key: _availableFeedsRowKey,
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => setState(() {
+            _availableFeedsExpanded = !_availableFeedsExpanded;
+            if (!_availableFeedsExpanded) {
+              _categorySearchController.clear();
+              _categorySearchQuery = '';
+            }
+          }),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF091620), Color(0xFF050C14)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.grid_view_rounded, color: Colors.white70, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Available Feeds', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                      Text(_availableFeedsExpanded ? 'Tap to manage sources or add to feed' : 'Browse & add more categories', style: const TextStyle(fontSize: 12, color: Color(0xFFFF6200))),
+                    ],
+                  ),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: _availableFeedsExpanded ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Container(
+                      width: 30, height: 30,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [const Color(0xFF1A1A1A), const Color(0xFF001A2A)],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1.2),
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 32, height: 32,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(Icons.grid_view_rounded, color: Colors.white54, size: 18),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Available Feeds', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
-                                Text(_availableFeedsExpanded ? 'Tap to manage sources or add to feed' : 'Browse & add more categories', style: const TextStyle(fontSize: 13, color: Colors.white38)),
-                              ],
-                            ),
-                            const Spacer(),
-                            AnimatedRotation(
-                              turns: _availableFeedsExpanded ? 0.5 : 0.0,
-                              duration: const Duration(milliseconds: 250),
-                              child: Container(
-                                width: 28, height: 28,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.07),
-                                  borderRadius: BorderRadius.circular(7),
-                                ),
-                                child: const Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 20),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      child: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 22),
                     ),
                   ),
-                );
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildAvailableFeedsContent() {
@@ -4389,53 +5649,198 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
                                       const SizedBox(height: 16),
                                       _buildAvailableFeedsHeader(),
                                       const SizedBox(height: 16),
-                                      Material(
-                                        key: _newslettersRowKey,
-                                        color: Colors.transparent,
-                                        borderRadius: BorderRadius.circular(14),
-                                        child: InkWell(
+                                      Container(
+                                        decoration: BoxDecoration(
                                           borderRadius: BorderRadius.circular(14),
-                                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NewslettersScreen())).then((_) { if (mounted) _fetchSettings(); }),
-                                          child: Ink(
-                                            decoration: BoxDecoration(
-                                              gradient: LinearGradient(
-                                                colors: [const Color(0xFF1A1A1A), const Color(0xFF1A001A)],
-                                                begin: Alignment.centerLeft,
-                                                end: Alignment.centerRight,
+                                  
+                                        ),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          borderRadius: BorderRadius.circular(14),
+                                          child: InkWell(
+                                            borderRadius: BorderRadius.circular(14),
+                                            onTap: () => setState(() => _truFlashExpanded = !_truFlashExpanded),
+                                            child: Ink(
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [Color(0xFF1C0E00), Color(0xFF100800)],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                ),
+                                                borderRadius: BorderRadius.circular(14),
+                                                border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
                                               ),
-                                              borderRadius: BorderRadius.circular(14),
-                                              border: Border.all(color: Colors.purpleAccent.withValues(alpha: 0.35), width: 1.2),
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                                child: Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 40, height: 40,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFFFF6200).withValues(alpha: 0.25),
+                                                        borderRadius: BorderRadius.circular(10),
+                                                      ),
+                                                      child: const Icon(Icons.bolt_rounded, color: Color(0xFFFF6200), size: 22),
+                                                    ),
+                                                    const SizedBox(width: 14),
+                                                    Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        const Text('Tru Flash', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                                                        Text(_truFlashExpanded ? 'Tap to enable or disable sources' : 'Manage breaking news sources', style: const TextStyle(fontSize: 12, color: Color(0xFFFF6200))),
+                                                      ],
+                                                    ),
+                                                    const Spacer(),
+                                                    AnimatedRotation(
+                                                      turns: _truFlashExpanded ? 0.5 : 0.0,
+                                                      duration: const Duration(milliseconds: 250),
+                                                      child: Container(
+                                                        width: 30, height: 30,
+                                                        decoration: BoxDecoration(
+                                                          color: const Color(0xFFFF6200).withValues(alpha: 0.22),
+                                                          borderRadius: BorderRadius.circular(8),
+                                                        ),
+                                                        child: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFFFF6200), size: 22),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
                                             ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                              child: Row(
-                                                children: [
-                                                  Container(
-                                                    width: 32, height: 32,
+                                          ),
+                                        ),
+                                      ),
+                                      if (_truFlashExpanded) ...[
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF141414),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.2), width: 1),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(vertical: 8),
+                                          child: Column(
+                                            children: [
+                                              Padding(
+                                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                                                child: Text(
+                                                  'Choose which sources appear in the Tru Flash tab. At least one must be enabled.',
+                                                  style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12, height: 1.4),
+                                                ),
+                                              ),
+                                              ..._kFlashSourceList.map((source) {
+                                                final name = source['name']!;
+                                                final isEnabled = _flashSourcesEnabled.contains(name);
+                                                return InkWell(
+                                                  onTap: () async {
+                                                    setState(() {
+                                                      if (isEnabled) {
+                                                        if (_flashSourcesEnabled.length > 1) _flashSourcesEnabled.remove(name);
+                                                      } else {
+                                                        _flashSourcesEnabled.add(name);
+                                                      }
+                                                    });
+                                                    final p = await SharedPreferences.getInstance();
+                                                    await p.setStringList('flash_enabled_sources', _flashSourcesEnabled);
+                                                  },
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                                     decoration: BoxDecoration(
-                                                      color: Colors.purpleAccent.withValues(alpha: 0.12),
-                                                      borderRadius: BorderRadius.circular(8),
+                                                      border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
                                                     ),
-                                                    child: const Icon(Icons.mark_email_read_outlined, color: Colors.purpleAccent, size: 18),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  const Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text('Newsletters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.3)),
-                                                      Text('Add email newsletters to your feed', style: TextStyle(fontSize: 13, color: Colors.white38)),
-                                                    ],
-                                                  ),
-                                                  const Spacer(),
-                                                  Container(
-                                                    width: 28, height: 28,
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.purpleAccent.withValues(alpha: 0.12),
-                                                      borderRadius: BorderRadius.circular(7),
+                                                    child: Row(
+                                                      children: [
+                                                        Container(
+                                                          width: 28, height: 28,
+                                                          decoration: BoxDecoration(
+                                                            color: isEnabled ? const Color(0xFFFF6200).withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.06),
+                                                            borderRadius: BorderRadius.circular(7),
+                                                          ),
+                                                          child: Icon(Icons.bolt_rounded, color: isEnabled ? const Color(0xFFFF6200) : Colors.white30, size: 16),
+                                                        ),
+                                                        const SizedBox(width: 12),
+                                                        Expanded(child: Text(name, style: TextStyle(color: isEnabled ? Colors.white : Colors.white54, fontWeight: FontWeight.w600, fontSize: 14))),
+                                                        Switch(
+                                                          value: isEnabled,
+                                                          onChanged: (_) async {
+                                                            setState(() {
+                                                              if (isEnabled) {
+                                                                if (_flashSourcesEnabled.length > 1) _flashSourcesEnabled.remove(name);
+                                                              } else {
+                                                                _flashSourcesEnabled.add(name);
+                                                              }
+                                                            });
+                                                            final p = await SharedPreferences.getInstance();
+                                                            await p.setStringList('flash_enabled_sources', _flashSourcesEnabled);
+                                                          },
+                                                          activeThumbColor: const Color(0xFFFF6200),
+                                                          activeTrackColor: const Color(0xFFFF6200).withValues(alpha: 0.3),
+                                                          inactiveThumbColor: Colors.white38,
+                                                          inactiveTrackColor: Colors.white12,
+                                                        ),
+                                                      ],
                                                     ),
-                                                    child: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.purpleAccent, size: 20),
                                                   ),
-                                                ],
+                                                );
+                                              }),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 16),
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(14),
+                                  
+                                        ),
+                                        child: Material(
+                                          key: _newslettersRowKey,
+                                          color: Colors.transparent,
+                                          borderRadius: BorderRadius.circular(14),
+                                          child: InkWell(
+                                            borderRadius: BorderRadius.circular(14),
+                                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NewslettersScreen())).then((_) { if (mounted) _fetchSettings(); }),
+                                            child: Ink(
+                                              decoration: BoxDecoration(
+                                                gradient: const LinearGradient(
+                                                  colors: [Color(0xFF180826), Color(0xFF0E0418)],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                ),
+                                                borderRadius: BorderRadius.circular(14),
+                                                border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
+                                              ),
+                                              child: Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                                child: Row(
+                                                  children: [
+                                                    Container(
+                                                      width: 40, height: 40,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFF8B2BE2).withValues(alpha: 0.30),
+                                                        borderRadius: BorderRadius.circular(10),
+                                                      ),
+                                                      child: const Icon(Icons.mark_email_read_outlined, color: Color(0xFFCC88FF), size: 22),
+                                                    ),
+                                                    const SizedBox(width: 14),
+                                                    const Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text('Newsletters', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                                                        Text('Add email newsletters to your feed', style: TextStyle(fontSize: 12, color: Color(0xFFFF6200))),
+                                                      ],
+                                                    ),
+                                                    const Spacer(),
+                                                    Container(
+                                                      width: 30, height: 30,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFF8B2BE2).withValues(alpha: 0.25),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                      ),
+                                                      child: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFFCC88FF), size: 22),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -4447,7 +5852,12 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
                                         final String subtitle = isActive
                                             ? (_isPremium ? 'Active subscription' : 'Free trial active')
                                             : 'AI summaries for every article';
-                                        return Material(
+                                        return Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(14),
+                                    
+                                          ),
+                                          child: Material(
                                           color: Colors.transparent,
                                           borderRadius: BorderRadius.circular(14),
                                           child: InkWell(
@@ -4455,67 +5865,56 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
                                             onTap: () => _showSubscriptionManagement(context, isActive),
                                             child: Ink(
                                               decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  colors: isActive
-                                                      ? [const Color(0xFF1A1A1A), const Color(0xFF1A0800)]
-                                                      : [const Color(0xFF1E1000), const Color(0xFF2C1A06)],
-                                                  begin: Alignment.centerLeft,
-                                                  end: Alignment.centerRight,
+                                                gradient: const LinearGradient(
+                                                  colors: [Color(0xFF220E00), Color(0xFF130600)],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
                                                 ),
                                                 borderRadius: BorderRadius.circular(14),
-                                                border: Border.all(
-                                                  color: isActive
-                                                      ? const Color(0xFFFF6200).withValues(alpha: 0.5)
-                                                      : const Color(0xFFE8A000).withValues(alpha: 0.65),
-                                                  width: 1.2,
-                                                ),
-                                                boxShadow: isActive ? [] : [
-                                                  BoxShadow(color: const Color(0xFFE8A000).withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 3)),
-                                                ],
+                                                border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.5), width: 1.0),
                                               ),
                                               child: Padding(
-                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
                                                 child: Row(
                                                   children: [
                                                     Container(
-                                                      width: 32, height: 32,
+                                                      width: 40, height: 40,
                                                       decoration: BoxDecoration(
                                                         color: isActive
-                                                            ? const Color(0xFFFF6200).withValues(alpha: 0.15)
-                                                            : const Color(0xFFE8A000).withValues(alpha: 0.18),
-                                                        borderRadius: BorderRadius.circular(8),
+                                                            ? const Color(0xFFFF6200).withValues(alpha: 0.25)
+                                                            : const Color(0xFFE8A000).withValues(alpha: 0.25),
+                                                        borderRadius: BorderRadius.circular(10),
                                                       ),
                                                       child: Icon(
                                                         isActive ? Icons.workspace_premium_rounded : Icons.auto_awesome_rounded,
                                                         color: isActive ? const Color(0xFFFF6200) : const Color(0xFFFFCC44),
-                                                        size: 18,
+                                                        size: 22,
                                                       ),
                                                     ),
-                                                    const SizedBox(width: 12),
+                                                    const SizedBox(width: 14),
                                                     Column(
                                                       crossAxisAlignment: CrossAxisAlignment.start,
                                                       children: [
                                                         Text(
                                                           isActive ? 'TruBrief Pro' : 'Upgrade to Pro',
-                                                          style: TextStyle(
-                                                            fontSize: 18, fontWeight: FontWeight.bold,
+                                                          style: const TextStyle(
+                                                            fontSize: 16, fontWeight: FontWeight.w700,
                                                             color: Colors.white,
-                                                            letterSpacing: 0.3,
                                                           ),
                                                         ),
-                                                        Text(subtitle, style: TextStyle(fontSize: 13, color: isActive ? const Color(0xFFFF6200).withValues(alpha: 0.8) : const Color(0xFFFFCC44).withValues(alpha: 0.85))),
+                                                        Text(subtitle, style: TextStyle(fontSize: 12, color: isActive ? const Color(0xFFFF6200) : const Color(0xFFFFCC44))),
                                                       ],
                                                     ),
                                                     const Spacer(),
                                                     if (isActive)
                                                       Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                                         decoration: BoxDecoration(
-                                                          color: const Color(0xFFFF6200).withValues(alpha: 0.15),
+                                                          color: const Color(0xFFFF6200).withValues(alpha: 0.2),
                                                           borderRadius: BorderRadius.circular(20),
-                                                          border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.4)),
+                                                          border: Border.all(color: const Color(0xFFFF6200).withValues(alpha: 0.8)),
                                                         ),
-                                                        child: const Text('ACTIVE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFFFF6200), letterSpacing: 1.0)),
+                                                        child: const Text('ACTIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFFFF6200), letterSpacing: 1.0)),
                                                       )
                                                     else
                                                       Container(
@@ -4531,7 +5930,7 @@ class _SourceSettingsScreenState extends State<SourceSettingsScreen> with Ticker
                                               ),
                                             ),
                                           ),
-                                        );
+                                        ));
                                       }),
                                       const SizedBox(height: 16),
                                     ],
@@ -5642,7 +7041,8 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                     const SizedBox(width: 8),
                     Switch(
                       value: _isInFeed,
-                      activeColor: const Color(0xFFFF6200),
+                      activeThumbColor: const Color(0xFFFF6200),
+                      activeTrackColor: const Color(0xFFFF6200).withValues(alpha: 0.3),
                       onChanged: (val) {
                         setState(() => _isInFeed = val);
                         widget.onChanged(_selectedSources, val, _isTabVisible);
@@ -5672,7 +7072,8 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                     const SizedBox(width: 8),
                     Switch(
                       value: _isTabVisible,
-                      activeColor: const Color(0xFFFF6200),
+                      activeThumbColor: const Color(0xFFFF6200),
+                      activeTrackColor: const Color(0xFFFF6200).withValues(alpha: 0.3),
                       onChanged: (val) {
                         setState(() => _isTabVisible = val);
                         widget.onChanged(_selectedSources, _isInFeed, val);
@@ -5738,6 +7139,8 @@ class ArticleReaderScreen extends StatefulWidget {
   final String? sourceLoginUrl;
   final bool initialIsSaved;
   final VoidCallback? onToggleSave;
+  final String? articleId;
+  final String? imageUrl;
 
   const ArticleReaderScreen({
     super.key,
@@ -5749,6 +7152,8 @@ class ArticleReaderScreen extends StatefulWidget {
     this.sourceLoginUrl,
     this.initialIsSaved = false,
     this.onToggleSave,
+    this.articleId,
+    this.imageUrl,
   });
 
   @override
@@ -5762,6 +7167,7 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
   InAppWebViewController? _webViewController;
   bool _summaryExpanded = true;
   late bool _isSaved;
+  bool _isFollowed = false;
 
   bool get _isSubscribed => widget.isSubscribed;
   bool get _hasSummary => widget.aiSummary != null && widget.aiSummary!.isNotEmpty;
@@ -5822,6 +7228,200 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
     super.initState();
     _summaryExpanded = false;
     _isSaved = widget.initialIsSaved;
+    _checkIfFollowed();
+  }
+
+  Future<void> _checkIfFollowed() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    final articleId = widget.articleId ?? widget.url.hashCode.toString();
+    try {
+      final row = await Supabase.instance.client
+          .from('trl_followed_stories')
+          .select('article_id')
+          .eq('user_id', userId)
+          .eq('article_id', articleId)
+          .maybeSingle();
+      if (mounted && row != null) setState(() => _isFollowed = true);
+    } catch (_) {}
+  }
+
+  Future<void> _shareArticle(BuildContext ctx) async {
+    final title = widget.articleTitle?.isNotEmpty == true
+        ? widget.articleTitle!
+        : 'Check out this article from ${widget.sourceName}';
+
+    const int cardW = 1080;
+    const int imgH = 608;
+    const double padding = 48.0;
+    const double titleFontSize = 46.0;
+    const double titleLineHeight = 1.3;
+    const int titleMaxLines = 4;
+    const double barH = 6.0;
+    const double barW = 80.0;
+    const double iconTargetH = 68.0;
+    const double nameFontSize = 54.0;
+    const double tagFontSize = 30.0;
+    const double sectionGap = 32.0;
+
+    const Color bgColor = Color(0xFF0D0D0D);
+    const Color orange = Color(0xFFFF6200);
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final fillPaint = Paint()..color = bgColor;
+
+    canvas.drawRect(Rect.fromLTWH(0, 0, cardW.toDouble(), 9999), fillPaint);
+
+    ui.Image? articleImg;
+    if (widget.imageUrl != null && widget.imageUrl!.isNotEmpty) {
+      try {
+        final resp = await http.get(Uri.parse(widget.imageUrl!)).timeout(const Duration(seconds: 10));
+        final codec = await ui.instantiateImageCodec(resp.bodyBytes, targetWidth: cardW);
+        final frame = await codec.getNextFrame();
+        articleImg = frame.image;
+      } catch (_) {}
+    }
+
+    double cursorY = 0;
+
+    if (articleImg != null) {
+      final iw = articleImg.width.toDouble();
+      final ih = articleImg.height.toDouble();
+      final dstAspect = cardW / imgH;
+      final srcAspect = iw / ih;
+      final Rect srcRect;
+      if (srcAspect > dstAspect) {
+        final newW = ih * dstAspect;
+        srcRect = Rect.fromLTWH((iw - newW) / 2, 0, newW, ih);
+      } else {
+        final newH = iw / dstAspect;
+        srcRect = Rect.fromLTWH(0, (ih - newH) / 2, iw, newH);
+      }
+      canvas.drawImageRect(articleImg, srcRect, Rect.fromLTWH(0, 0, cardW.toDouble(), imgH.toDouble()), Paint()..filterQuality = FilterQuality.high);
+
+      final shader = ui.Gradient.linear(
+        const Offset(0, imgH * 0.35),
+        Offset(0, imgH.toDouble()),
+        [const Color(0x000D0D0D), bgColor],
+      );
+      canvas.drawRect(Rect.fromLTWH(0, 0, cardW.toDouble(), imgH.toDouble()), Paint()..shader = shader);
+      cursorY = imgH.toDouble();
+    }
+
+    cursorY += sectionGap;
+
+    final titleParagraph = (ui.ParagraphBuilder(ui.ParagraphStyle(
+      textDirection: ui.TextDirection.ltr,
+      maxLines: titleMaxLines,
+      ellipsis: '…',
+    ))
+          ..pushStyle(ui.TextStyle(
+            color: Colors.white,
+            fontSize: titleFontSize,
+            fontWeight: ui.FontWeight.w700,
+            height: titleLineHeight,
+          ))
+          ..addText(title))
+        .build()
+      ..layout(ui.ParagraphConstraints(width: cardW - padding * 2));
+    canvas.drawParagraph(titleParagraph, Offset(padding, cursorY));
+    cursorY += titleParagraph.height + sectionGap;
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(padding, cursorY, barW, barH), const Radius.circular(3)),
+      Paint()..color = orange,
+    );
+    cursorY += barH + sectionGap;
+
+    ui.Image? logoIcon;
+    try {
+      final data = await rootBundle.load('assets/images/1024x1024.png');
+      final codec = await ui.instantiateImageCodec(data.buffer.asUint8List(), targetHeight: iconTargetH.toInt());
+      final frame = await codec.getNextFrame();
+      logoIcon = frame.image;
+    } catch (_) {}
+
+    double logoRowY = cursorY;
+    double iconEndX = padding;
+
+    if (logoIcon != null) {
+      final iconW = logoIcon.width.toDouble();
+      final iconH2 = logoIcon.height.toDouble();
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromLTWH(padding, logoRowY, iconW, iconH2), const Radius.circular(12)),
+        Paint()..color = const Color(0xFF000000),
+      );
+      canvas.drawImage(logoIcon, Offset(padding, logoRowY), Paint()..filterQuality = FilterQuality.high);
+      iconEndX = padding + iconW + 20;
+    }
+
+    final nameParagraph = (ui.ParagraphBuilder(ui.ParagraphStyle(textDirection: ui.TextDirection.ltr, maxLines: 1))
+          ..pushStyle(ui.TextStyle(color: Colors.white, fontSize: nameFontSize, fontWeight: ui.FontWeight.w900, letterSpacing: -1.0))
+          ..addText('Tru')
+          ..pushStyle(ui.TextStyle(color: orange, fontSize: nameFontSize, fontWeight: ui.FontWeight.w900, letterSpacing: -1.0))
+          ..addText('Brief'))
+        .build()
+      ..layout(ui.ParagraphConstraints(width: cardW - iconEndX - padding));
+
+    final iconH = logoIcon?.height.toDouble() ?? nameFontSize * 1.2;
+    final nameY = logoRowY + (iconH - nameFontSize * 1.2) / 2;
+    canvas.drawParagraph(nameParagraph, Offset(iconEndX, nameY));
+
+    cursorY = logoRowY + iconH + 24;
+
+    final tagParagraph = (ui.ParagraphBuilder(ui.ParagraphStyle(textDirection: ui.TextDirection.ltr, maxLines: 1))
+          ..pushStyle(ui.TextStyle(color: const Color(0xFF888888), fontSize: tagFontSize))
+          ..addText('Smart News Delivered · Download Free on Google Play & App Store'))
+        .build()
+      ..layout(ui.ParagraphConstraints(width: cardW - padding * 2));
+    canvas.drawParagraph(tagParagraph, Offset(padding, cursorY));
+    cursorY += tagParagraph.height + sectionGap;
+
+    final totalH = cursorY.ceil();
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(cardW, totalH);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+    if (byteData == null) return;
+
+    final tempDir = await getTemporaryDirectory();
+    final file = File('${tempDir.path}/trubrief_share_${DateTime.now().millisecondsSinceEpoch}.png');
+    await file.writeAsBytes(byteData.buffer.asUint8List());
+
+    if (!ctx.mounted) return;
+    await SharePlus.instance.share(ShareParams(
+      files: [XFile(file.path, mimeType: 'image/png')],
+      subject: title,
+    ));
+  }
+
+  Future<void> _toggleFollow() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    final articleId = widget.articleId ?? widget.url.hashCode.toString();
+    setState(() => _isFollowed = !_isFollowed);
+    try {
+      if (_isFollowed) {
+        await Supabase.instance.client.from('trl_followed_stories').upsert({
+          'user_id': userId,
+          'article_id': articleId,
+          'title': widget.articleTitle ?? '',
+          'url': widget.url,
+          'source_name': widget.sourceName,
+          'followed_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'user_id,article_id', ignoreDuplicates: true);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Following this story. You\'ll be notified of updates.'), backgroundColor: Color(0xFF1C1C1E), duration: Duration(seconds: 3)),
+        );
+      } else {
+        await Supabase.instance.client.from('trl_followed_stories').delete()
+            .eq('user_id', userId).eq('article_id', articleId);
+      }
+    } catch (e) {
+      setState(() => _isFollowed = !_isFollowed);
+      debugPrint('Follow error: $e');
+    }
   }
 
   @override
@@ -5834,6 +7434,14 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
         title: const Text('Reading Article'),
         backgroundColor: Colors.black,
         actions: [
+          IconButton(
+            icon: Icon(
+              _isFollowed ? Icons.notifications_active : Icons.notifications_none,
+              color: _isFollowed ? const Color(0xFFFF6200) : Colors.white,
+            ),
+            tooltip: _isFollowed ? 'Following story' : 'Follow story',
+            onPressed: _toggleFollow,
+          ),
           if (widget.onToggleSave != null)
             IconButton(
               icon: Icon(
@@ -5849,21 +7457,7 @@ class _ArticleReaderScreenState extends State<ArticleReaderScreen> {
           IconButton(
             icon: const Icon(Icons.share_rounded),
             tooltip: 'Share article',
-            onPressed: () {
-              final title = widget.articleTitle?.isNotEmpty == true
-                  ? widget.articleTitle!
-                  : 'Check out this article from ${widget.sourceName}';
-              const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.truresolve.trubrief';
-              final shareText =
-                  '$title\n\n${widget.url}\n\n'
-                  '📰 Shared via TruBrief – Smart News Delivered\n'
-                  'Read this and more in the free TruBrief app:\n$playStoreUrl';
-              SharePlus.instance.share(ShareParams(text: shareText, subject: title));
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _webViewController?.reload(),
+            onPressed: () => _shareArticle(context),
           ),
         ],
       ),
@@ -6347,6 +7941,7 @@ class _SavedArticlesScreenState extends State<SavedArticlesScreen> {
         isSubscribed: widget.isSubscribed,
         initialIsSaved: true,
         onToggleSave: () => _unsave(article['id'].toString()),
+        articleId: article['id']?.toString(),
       ),
     ));
   }
@@ -6606,4 +8201,147 @@ class _SpotlightPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SpotlightPainter old) =>
       old.pulse != pulse || old.highlightRect != highlightRect;
+}
+
+class TruFlashSettingsScreen extends StatefulWidget {
+  const TruFlashSettingsScreen({super.key});
+
+  @override
+  State<TruFlashSettingsScreen> createState() => _TruFlashSettingsScreenState();
+}
+
+class _TruFlashSettingsScreenState extends State<TruFlashSettingsScreen> {
+  static const List<Map<String, String>> _sources = [
+    {'name': 'Fox News', 'url': 'https://feeds.foxnews.com/foxnews/latest'},
+    {'name': 'CNN', 'url': 'https://rss.cnn.com/rss/edition.rss'},
+    {'name': 'NBC News', 'url': 'https://feeds.nbcnews.com/nbcnews/public/news'},
+    {'name': 'Politico', 'url': 'https://rss.politico.com/politics-news.xml'},
+    {'name': 'ABC News', 'url': 'https://feeds.abcnews.com/abcnews/topstories'},
+    {'name': 'CBS News', 'url': 'https://feeds.cbsnews.com/cbsnews/rss/latest'},
+    {'name': 'NPR', 'url': 'https://feeds.npr.org/1001/rss.xml'},
+    {'name': 'Reuters', 'url': 'https://feeds.reuters.com/reuters/topNews'},
+    {'name': 'The Hill', 'url': 'https://thehill.com/rss/syndicator/19110'},
+    {'name': 'DW News', 'url': 'https://rss.dw.com/rdf/rss-en-top'},
+  ];
+
+  List<String> _enabled = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList('flash_enabled_sources');
+    if (mounted) {
+      setState(() {
+        _enabled = saved ?? _sources.map((s) => s['name']!).toList();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('flash_enabled_sources', _enabled);
+  }
+
+  void _toggle(String name) {
+    setState(() {
+      if (_enabled.contains(name)) {
+        if (_enabled.length > 1) _enabled.remove(name);
+      } else {
+        _enabled.add(name);
+      }
+    });
+    _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Text('Tru Flash Sources', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFF6200)))
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'Choose which sources appear in the Tru Flash tab. At least one source must be enabled.',
+                    style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.5),
+                  ),
+                ),
+                ..._sources.map((source) {
+                  final name = source['name']!;
+                  final isEnabled = _enabled.contains(name);
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1C1C1E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isEnabled ? const Color(0xFFFF6200).withValues(alpha: 0.5) : Colors.white12,
+                        width: 1.2,
+                      ),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => _toggle(name),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: isEnabled
+                                    ? const Color(0xFFFF6200).withValues(alpha: 0.15)
+                                    : Colors.white.withValues(alpha: 0.07),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.bolt_rounded,
+                                color: isEnabled ? const Color(0xFFFF6200) : Colors.white38,
+                                size: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                name,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+                              ),
+                            ),
+                            Switch(
+                              value: isEnabled,
+                              onChanged: (_) => _toggle(name),
+                              activeThumbColor: const Color(0xFFFF6200),
+                              activeTrackColor: const Color(0xFFFF6200).withValues(alpha: 0.3),
+                              inactiveThumbColor: Colors.white38,
+                              inactiveTrackColor: Colors.white12,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+    );
+  }
 }
